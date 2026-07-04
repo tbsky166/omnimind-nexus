@@ -60,7 +60,7 @@ export async function executeFileWrite(args: Record<string, unknown>): Promise<{
     return {
       success: true,
       fileName: safeName,
-      fileUrl: `/workspace/${safeName}`,
+      fileUrl: `/api/files/${safeName}?ws=1`,
       action,
       message: `${action === "append" ? "追加" : "写入"}文件：${safeName}（${(stat.size / 1024).toFixed(1)} KB）`,
     };
@@ -249,8 +249,8 @@ export async function executeGenerateDocument(args: Record<string, unknown>): Pr
   const filePath = path.join(TEMP_DIR, fileName);
   fs.writeFileSync(filePath, buffer);
 
-  // Public URL path
-  const fileUrl = `/temp/${fileName}`;
+  // API route for download (works in both dev & production)
+  const fileUrl = `/api/files/${fileName}`;
 
   return {
     success: true,
