@@ -1,3 +1,6 @@
+// Agent 定义与演示数据 / Agent definitions and demo data
+
+// Agent 接口 / Agent interface
 export interface Agent {
   name: string;
   emoji: string;
@@ -8,6 +11,7 @@ export interface Agent {
   isCreator?: boolean;
 }
 
+// 协议层接口 / Protocol layer interface
 export interface ProtocolLayer {
   id: string;
   name: string;
@@ -16,6 +20,7 @@ export interface ProtocolLayer {
   detail: string;
 }
 
+// 团队接口 / Team interface
 export interface Team {
   name: string;
   tag: string;
@@ -24,11 +29,13 @@ export interface Team {
   mode: string;
 }
 
+// 统计接口 / Stat interface
 export interface Stat {
   value: string;
   label: string;
 }
 
+// 32 个内置专业 Agent 数据 / 32 built-in professional Agent data
 export const agents: Agent[] = [
   { name: "Creator", emoji: "🧬", role: "Agent Creator", category: "Core", personality: "造物主心态 · 创新驱动 · 对平庸的设计不可忍", description: "根据用户需求自动分析能力缺口，从零设计并生成新的 Agent 技能包", isCreator: true },
   { name: "架构师", emoji: "🏗️", role: "Architect", category: "Engineering", personality: "结构主义者 · 完美主义 · 对混乱零容忍", description: "重建模块划分、分层架构和数据流，输出可交互的架构全景图" },
@@ -64,6 +71,7 @@ export const agents: Agent[] = [
   { name: "无障碍 Agent", emoji: "♿", role: "A11y", category: "Specialized", personality: "包容设计 · 对 99% 可用不可忍", description: "无障碍审计、WCAG 合规、辅助技术适配、包容性设计、可访问性测试" },
 ];
 
+// A2A 七层协议数据 / A2A seven-layer protocol data
 export const protocolLayers: ProtocolLayer[] = [
   { id: "L7", name: "A2A-Fed 联邦协议", emoji: "🌐", description: "跨 Agent 集体决策、联邦学习、群体智慧聚合", detail: "当任务需要全团队共识时启动。多 Agent 各自独立产出方案，联邦聚合器综合生成最优结果" },
   { id: "L6", name: "A2A-Arb 仲裁协议", emoji: "⚖️", description: "Agent 间冲突解决、加权投票、自动升级", detail: "双方提交立场陈述 → 仲裁组加权投票 → 附带少数派报告。历史信用分决定投票权重" },
@@ -74,6 +82,7 @@ export const protocolLayers: ProtocolLayer[] = [
   { id: "L1", name: "A2A-Dis 发现协议", emoji: "🔍", description: "能力广播、服务订阅、Agent 心跳", detail: "Agent 上线时广播能力签名。新 Agent 200ms 内被全网络感知。支持按能力订阅" },
 ];
 
+// 预设团队数据 / Preset team data
 export const teams: Team[] = [
   { name: "全栈创业者", tag: "Startup", description: "从 0 到 1 构建产品，覆盖商业验证→设计→开发→运营全链路", agents: ["市场", "产品", "架构", "编码", "设计", "策略", "财务", "测试"], mode: "发现 + 协商 + 并行" },
   { name: "企业软件开发", tag: "Enterprise", description: "工程化全流程 + A2A 质量闭环。Quality Gate + A2A-Cre 确保每个环节的输出可信", agents: ["架构", "编码", "审查", "测试", "运维", "数据库", "PM", "性能"], mode: "流水线 + 信用门禁 + 记忆传承" },
@@ -81,6 +90,7 @@ export const teams: Team[] = [
   { name: "内容工厂", tag: "Content", description: "大规模内容生产 + A2A 情感通道适配不同写作风格", agents: ["写作×3", "研究", "设计", "翻译", "多媒体", "社媒"], mode: "竞标协商 + 情感适配 + 联邦聚合" },
 ];
 
+// 首页统计数据 / Homepage statistics data
 export const stats: Stat[] = [
   { value: "32", label: "内置专业 Agent" },
   { value: "7", label: "A2A 协议层" },
@@ -88,6 +98,7 @@ export const stats: Stat[] = [
   { value: "∞", label: "Creator 无限扩展" },
 ];
 
+// Creator Agent 创建步骤 / Creator Agent creation steps
 export const creatorSteps = [
   { label: "缺口分析", desc: "用户连续请求暴露能力不足" },
   { label: "设计", desc: "定义 Agent 能力 + 性格 + 工具" },
@@ -96,10 +107,12 @@ export const creatorSteps = [
   { label: "发布", desc: "提交到 Agent 市场供所有用户使用" },
 ];
 
+// Agent 分类列表 / Agent category list
 export const agentCategories = ["Core", "Engineering", "Business", "Creative", "Specialized"] as const;
 
-// ---- Conversation Demo Data ----
+// ---- 对话演示数据 / Conversation Demo Data ----
 
+// 对话消息接口 / Conversation message interface
 export interface ConversationMessage {
   speaker: string;
   emoji: string;
@@ -117,6 +130,7 @@ export interface ConversationMessage {
   delta?: string;
 }
 
+// 对话场景接口 / Conversation scenario interface
 export interface ConversationScenario {
   id: string;
   title: string;
@@ -125,6 +139,7 @@ export interface ConversationScenario {
   messages: ConversationMessage[];
 }
 
+// 对话场景演示数据（安全审查、Creator 自进化、架构辩论、联邦聚合） / Conversation scenario demo data (security audit, Creator self-evolution, architecture debate, federated aggregation)
 export const conversationScenarios: ConversationScenario[] = [
   {
     id: "security",

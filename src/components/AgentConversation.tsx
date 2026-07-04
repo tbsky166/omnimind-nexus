@@ -5,7 +5,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { conversationScenarios } from "@/data/agents";
 import type { ConversationScenario, ConversationMessage } from "@/data/agents";
 
-// ── Pixel color palette ──
+// ── 主对话 UI 与流水线可视化 / Main conversation UI with pipeline visualization ──
+
+// ── 像素调色板 / Pixel color palette ──
 const agentColors: Record<string, { bg: string; border: string; text: string; primary: string; secondary: string; skin: string }> = {
   Router:         { bg: "#f0f0f0", border: "#888", text: "#333", primary: "#555", secondary: "#999", skin: "#ffd5b8" },
   Planner:        { bg: "#faf5e8", border: "#c4a44a", text: "#5c4a1f", primary: "#8b6914", secondary: "#c4a44a", skin: "#ffd5b8" },
@@ -18,7 +20,7 @@ function getColor(name: string) {
   return agentColors[name] || agentColors.default;
 }
 
-// ── Pixel art: 8x8 grid → SVG at arbitrary size ──
+// ── 像素艺术组件：8x8 网格 → 任意尺寸 SVG / PixelArtSVG: 8x8 grid → SVG at arbitrary size ──
 type PixelGrid = (string | null)[][];
 
 function PixelArtSVG({ grid, size, palette }: { grid: PixelGrid; size: number; palette: Record<string, string> }) {
@@ -44,8 +46,8 @@ function PixelArtSVG({ grid, size, palette }: { grid: PixelGrid; size: number; p
   );
 }
 
-// ── Agent pixel art definitions (8x8 grids) ──
-// Palette: p=primary s=secondary w=white e=accent d=dark
+// ── Agent 像素精灵定义（8x8 网格）/ Agent pixel art sprites (8x8 grids) ──
+// 调色板：p=主色 s=辅色 w=白色 e=强调色 d=深色 / Palette: p=primary s=secondary w=white e=accent d=dark
 const agentSprites: Record<string, { grid: PixelGrid; palette: Record<string, string> }> = {
   // Router: compass
   Router: {
@@ -567,16 +569,17 @@ const agentSprites: Record<string, { grid: PixelGrid; palette: Record<string, st
   },
 };
 
+// 根据 Agent 名称获取对应的精灵图 / Get sprite for agent by name
 function getSpriteForAgent(name: string): { grid: PixelGrid; palette: Record<string, string> } {
   if (agentSprites[name]) return agentSprites[name];
   return agentSprites.default;
 }
 
-// Customize colors per agent — only for the default (shared) sprite
+// 根据 Agent 名称自定义调色板 — 仅对默认精灵生效 / Customize colors per agent — only for the default (shared) sprite
 function getAgentPalette(name: string, basePalette: Record<string, string>): Record<string, string> {
-  // Named sprites have their own unique colors — don't override
+  // 具名精灵有自己的独特色彩 — 不覆盖 / Named sprites have their own unique colors — don't override
   if (agentSprites[name]) return basePalette;
-  // Default sprite: customize with agent's category colors
+  // 默认精灵：使用 Agent 的分类颜色 / Default sprite: customize with agent's category colors
   const clr = getColor(name);
   return {
     ...basePalette,
@@ -588,7 +591,7 @@ function getAgentPalette(name: string, basePalette: Record<string, string>): Rec
   };
 }
 
-// ── Pixel character sprite (SVG pixel art) ──
+// ── 像素角色精灵组件（SVG 像素艺术）/ PixelSprite component (SVG pixel art) ──
 function PixelSprite({ name, size = 48, active = false }: { name: string; size?: number; active?: boolean }) {
   const sprite = getSpriteForAgent(name);
   const palette = getAgentPalette(name, sprite.palette);
@@ -619,7 +622,7 @@ function PixelSprite({ name, size = 48, active = false }: { name: string; size?:
   );
 }
 
-// ── SVG item icons for tool cards ──
+// ── SVG 文件/工具图标组件 / SVG item icons for tool cards ──
 function DocxIcon({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
@@ -658,13 +661,14 @@ function FileIcon({ size = 24 }: { size?: number }) {
   );
 }
 
+// 工具图标分发器：根据类型返回对应图标 / Tool icon dispatcher: returns icon based on type
 function ToolIcon({ type, size = 24 }: { type: string; size?: number }) {
   if (type === "xlsx") return <XlsxIcon size={size} />;
   if (type === "docx") return <DocxIcon size={size} />;
   return <FileIcon size={size} />;
 }
 
-// ── Pipe segment between nodes ──
+// ── 节点间的管道连接段 / Pipe segment between nodes ──
 function Pipe({ active = false }: { active?: boolean }) {
   return (
     <div className="flex items-center flex-shrink-0" style={{ width: 24, height: 6 }}>
@@ -690,7 +694,7 @@ function Pipe({ active = false }: { active?: boolean }) {
   );
 }
 
-// ── Pipeline Node ──
+// ── 流水线节点组件 / PipelineNode component ──
 interface PipelineNodeData {
   id: string;
   name: string;
@@ -712,7 +716,7 @@ function PipelineNode({
   const isSystem = node.name === "Router" || node.name === "Planner" || node.name === "仲裁组" || node.name === "Quality Gate";
   const bubbleRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll bubble to bottom
+  // 气泡内容自动滚动到底部 / Auto-scroll bubble to bottom
   useEffect(() => {
     if (bubbleRef.current) {
       bubbleRef.current.scrollTop = bubbleRef.current.scrollHeight;
@@ -721,10 +725,10 @@ function PipelineNode({
 
   return (
     <div className="flex flex-col items-center flex-shrink-0" style={{ minWidth: 80, maxWidth: 140 }}>
-      {/* Character sprite */}
+      {/* 角色精灵 / Character sprite */}
       <PixelSprite name={node.name} active={node.status === "active"} />
 
-      {/* Name plate */}
+      {/* 名称标签 / Name plate */}
       <div
         className="mt-1 px-2 py-0.5 text-center"
         style={{
@@ -740,7 +744,7 @@ function PipelineNode({
         <p className="pixel-text text-[7px] tracking-[0.15em] text-ink/35">{node.layer}</p>
       </div>
 
-      {/* Status indicator */}
+      {/* 状态指示器 / Status indicator */}
       <div className="mt-0.5">
         {node.status === "waiting" && (
           <span className="pixel-text text-[7px] text-ink/20">···</span>
@@ -770,7 +774,7 @@ function PipelineNode({
             animate={{ opacity: 1, scale: 1 }}
             className="mt-2 w-full"
           >
-            {/* Speech bubble */}
+            {/* 对话气泡 / Speech bubble */}
             <div
               className="relative px-2.5 py-2 text-left"
               style={{
@@ -780,7 +784,7 @@ function PipelineNode({
                 imageRendering: "pixelated",
               }}
             >
-              {/* Bubble tail */}
+              {/* 气泡三角尾巴 / Bubble tail */}
               <div
                 className="absolute -top-[6px] left-1/2 -translate-x-1/2"
                 style={{
@@ -824,7 +828,7 @@ function PipelineNode({
               )}
             </div>
 
-            {/* Tool call cards */}
+            {/* 工具调用卡片 / Tool call cards */}
             {node.toolCalls.map((tc, i) => (
               <a
                 key={i}
@@ -851,7 +855,7 @@ function PipelineNode({
   );
 }
 
-// ── Pipeline View ──
+// ── 流水线视图组件 / PipelineView component ──
 function PipelineView({
   messages,
   loading,
@@ -861,19 +865,19 @@ function PipelineView({
 }) {
   const pipelineRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to latest node
+  // 自动滚动到最新节点 / Auto-scroll to latest node
   useEffect(() => {
     if (pipelineRef.current) {
       pipelineRef.current.scrollLeft = pipelineRef.current.scrollWidth;
     }
   }, [messages]);
 
-  // Build pipeline from messages
+  // 从消息构建流水线节点 / Build pipeline nodes from messages
   const nodes = useMemo(() => {
     const result: PipelineNodeData[] = [];
     const seen = new Set<string>();
 
-    // User node
+    // 用户节点 / User node
     const userMsg = messages.find((m) => m.isUser);
     if (userMsg) {
       result.push({
@@ -891,7 +895,7 @@ function PipelineView({
       const nodeId = `${name}_${layer}`;
 
       if (seen.has(nodeId)) {
-        // Update existing node
+        // 更新已存在的节点 / Update existing node
         const existing = result.find((n) => n.id === nodeId);
         if (existing) {
           if (msg.fileUrl) {
@@ -918,7 +922,7 @@ function PipelineView({
       });
     }
 
-    // Mark the last agent node as active if loading
+    // 加载中时标记最后一个 Agent 节点为活跃状态 / Mark the last agent node as active if loading
     if (loading && result.length > 0) {
       const lastAgent = [...result].reverse().find((n) =>
         n.name !== "Router" && n.name !== "Planner" && n.name !== "YOU" && n.name !== "仲裁组" && n.name !== "Quality Gate"
@@ -937,7 +941,7 @@ function PipelineView({
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      {/* Pipeline scroll area */}
+      {/* 流水线滚动区域 / Pipeline scroll area */}
       <div
         ref={pipelineRef}
         className="flex-1 overflow-x-auto overflow-y-auto p-4"
@@ -962,7 +966,8 @@ function PipelineView({
   );
 }
 
-// ── MessageBubble (for DemoChat, kept as-is) ──
+// ── 消息气泡组件（DemoChat 使用）/ MessageBubble component (for DemoChat) ──
+// 层级颜色映射 / Layer color mapping
 const layerColors: Record<string, string> = {
   L1: "border-l-[#d4d4d4]", L2: "border-l-[#bfbfbf]", L3: "border-l-[#a3a3a3]",
   L4: "border-l-[#8a8a8a]", L5: "border-l-[#707070]", L6: "border-l-[#525252]", L7: "border-l-[#1a1a1a]",
@@ -1051,7 +1056,8 @@ function MessageBubble({ msg, index, isStreaming = false }: {
   );
 }
 
-// ── Live Chat Component ──
+// ── 实时对话组件 / LiveChat component ──
+// 会话元数据类型 / Session metadata type
 interface SessionMeta { id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; }
 
 function LiveChat() {
@@ -1075,6 +1081,7 @@ function LiveChat() {
   const currentSessionIdRef = useRef(currentSessionId);
   currentSessionIdRef.current = currentSessionId;
 
+  // ── 会话管理：加载、保存、删除、切换会话 / Session management: load, save, delete, switch sessions ──
   useEffect(() => {
     fetch("/api/sessions").then((r) => r.json()).then((d) => { if (d.sessions) setSessions(d.sessions); }).catch(() => {});
   }, []);
@@ -1110,6 +1117,7 @@ function LiveChat() {
     } catch {}
   }, []);
 
+  // ── 文件上传处理 / File upload handling ──
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1127,6 +1135,7 @@ function LiveChat() {
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   }, []);
 
+  // ── 发送消息：调用 API 并处理 SSE 流式响应 / handleSend: call API and process SSE streaming response ──
   const handleSend = useCallback(async (e?: React.MouseEvent | React.KeyboardEvent) => {
     e?.preventDefault(); e?.stopPropagation();
     const text = input.trim();
@@ -1149,6 +1158,7 @@ function LiveChat() {
       if (!reader) throw new Error("No response body");
       const decoder = new TextDecoder();
       let buffer = "";
+      // ── SSE 流式响应解析 / SSE streaming response parsing ──
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -1197,7 +1207,7 @@ function LiveChat() {
 
   return (
     <div className="flex flex-col h-[600px]">
-      {/* Session header */}
+      {/* 会话头部栏 / Session header */}
       <div className="flex items-center gap-2 px-4 py-2 border-b-2 border-ink bg-[#fafafa]">
         <button onClick={() => setShowSessions(!showSessions)} className="pixel-text text-[10px] tracking-[0.1em] text-ink/50 hover:text-ink transition-colors">
           {showSessions ? "✕ CLOSE" : "☰ HISTORY"}{sessions.length > 0 && <span className="text-ink/30 ml-0.5">({sessions.length})</span>}
@@ -1209,7 +1219,7 @@ function LiveChat() {
         {error && <span className="pixel-text text-[9px] text-red-500 ml-auto truncate max-w-[200px]">{error}</span>}
       </div>
 
-      {/* Session list */}
+      {/* 会话列表 / Session list */}
       {showSessions && (
         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} className="border-b-2 border-ink bg-white overflow-y-auto max-h-[200px]">
           {sessions.length === 0 ? (
@@ -1228,10 +1238,10 @@ function LiveChat() {
         </motion.div>
       )}
 
-      {/* Pipeline view */}
+      {/* 流水线视图 / Pipeline view */}
       <PipelineView messages={messages} loading={loading} />
 
-      {/* Input */}
+      {/* 输入区域 / Input */}
       <div className="border-t-2 border-ink p-4 bg-[#fafafa]">
         {uploadedFile && (
           <div className="flex items-center gap-2 mb-2 px-2">
@@ -1258,7 +1268,7 @@ function LiveChat() {
   );
 }
 
-// ── Demo Chat Component ──
+// ── 演示对话组件（预录制场景回放）/ DemoChat component (prerecorded scenario playback) ──
 function DemoChat({ scenario }: { scenario: ConversationScenario }) {
   const [visibleMessages, setVisibleMessages] = useState(0);
   const [hasStarted, setHasStarted] = useState(false);
@@ -1297,9 +1307,10 @@ function DemoChat({ scenario }: { scenario: ConversationScenario }) {
   );
 }
 
-// ── Main Component ──
+// ── 主组件：Agent 对话入口，包含场景切换标签页 / Main component: Agent conversation entry with scenario tabs ──
 const allTabs = [...conversationScenarios.map((s) => ({ id: s.id, subtitle: s.subtitle, title: s.title, isLive: false })), { id: "live", subtitle: "Real-time", title: "Live", isLive: true }];
 
+// ── 场景标签页组件 / ScenarioTab component ──
 function ScenarioTab({ tab, isActive, onClick, index }: { tab: (typeof allTabs)[0]; isActive: boolean; onClick: () => void; index: number }) {
   return (
     <motion.button onClick={onClick}
@@ -1314,6 +1325,7 @@ function ScenarioTab({ tab, isActive, onClick, index }: { tab: (typeof allTabs)[
   );
 }
 
+// 对话系统入口组件 / Agent conversation entry component
 export default function AgentConversation() {
   const [activeIndex, setActiveIndex] = useState(allTabs.length - 1);
   const activeTab = allTabs[activeIndex];

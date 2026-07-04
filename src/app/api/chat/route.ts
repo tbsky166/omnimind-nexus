@@ -1,4 +1,6 @@
+// 主 A2A 聊天 API 路由 — 多 Agent 协作的核心入口，通过 SSE 流式返回各阶段输出 / Main A2A Chat API route — the core entry point for multi-agent collaboration, streaming each phase's output via SSE
 import { NextRequest } from "next/server";
+// ---- 导入：提示词构建、LLM 调用、文档工具、Agent 数据 / Imports: prompt builders, LLM callers, document tools, agent data ----
 import {
   buildAgentPrompt,
   buildRouterPrompt,
@@ -20,6 +22,7 @@ import { agents } from "@/data/agents";
 
 export const runtime = "nodejs";
 
+// ---- 前端展示用的 Agent 消息数据结构 / Data structure for Agent messages displayed in the frontend ----
 interface AgentMessage {
   speaker: string;
   emoji: string;
@@ -36,16 +39,19 @@ interface AgentMessage {
   delta?: string;
 }
 
-// ---- Helpers ----
+// ---- 工具函数 / Helper functions ----
+
+// 将对话历史格式化为字符串，用于拼接到 LLM 上下文中 / Format conversation history into a string for LLM context
 function formatHistory(msgs: AgentMessage[]): string {
   return msgs.map((m) => `[${m.speaker}${m.a2aLayer ? ` | ${m.a2aLayer}` : ""}]: ${m.content}`).join("\n");
 }
 
+// 通用 SSE 写入：将一条消息序列化为 SSE 格式并发送 / Generic SSE writer: serializes a message into SSE format and sends it
 async function writeSSE(controller: ReadableStreamDefaultController, encoder: TextEncoder, msg: AgentMessage) {
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
 }
 
-// Streaming helpers
+// ---- 流式输出辅助函数：分别发送 start / delta / end 事件，前端据此重建完整内容 / Streaming helpers: send start/delta/end events for the frontend to reconstruct full content ----
 function streamStart(controller: ReadableStreamDefaultController, encoder: TextEncoder, speaker: string, emoji: string, a2aLayer: string) {
   const msg: AgentMessage = { speaker, emoji, content: "", a2aLayer, streaming: "start" };
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
@@ -61,13 +67,14 @@ function streamEnd(controller: ReadableStreamDefaultController, encoder: TextEnc
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
 }
 
-// Timeout helper — abort after ms
+// 超时辅助：创建 AbortController，在指定毫秒后自动取消 / Timeout helper: creates an AbortController that auto-cancels after the given milliseconds
 function withTimeout(ms: number): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
 }
 
+// 将前端传来的历史消息转换为 LLM 可用的 ChatMessage 数组 / Convert frontend history messages into ChatMessage array for LLM consumption
 function buildPrevMessages(prevHistory: unknown): ChatMessage[] {
   if (!prevHistory || !Array.isArray(prevHistory)) return [];
   return prevHistory
@@ -78,6 +85,7 @@ function buildPrevMessages(prevHistory: unknown): ChatMessage[] {
     }));
 }
 
+// 构建每个阶段注入 LLM 的完整上下文字符串，包含之前对话、当前任务、Router 分析和文件内容 / Build the full context string injected into each LLM phase, including prior conversation, current task, Router analysis, and file content
 function buildContextString(prevHistory: unknown, message: string, routerAnalysis: string, selectedAgents: string[], fileContext?: string): { fullContext: string; isFollowUp: boolean } {
   const prevContext = prevHistory && Array.isArray(prevHistory)
     ? (prevHistory as AgentMessage[])
@@ -97,6 +105,7 @@ function buildContextString(prevHistory: unknown, message: string, routerAnalysi
   return { fullContext, isFollowUp };
 }
 
+// 组装最终发给 LLM 的消息数组：拼接历史消息 + 当前会话记录 + 上下文 / Assemble the final message array for LLM: concatenate prior messages + current session history + context
 function buildMessages(prevMessages: ChatMessage[], currentContext: string, sessionHistory: string): ChatMessage[] {
   const msgs: ChatMessage[] = [...prevMessages];
   if (sessionHistory) {
@@ -107,7 +116,7 @@ function buildMessages(prevMessages: ChatMessage[], currentContext: string, sess
   return msgs;
 }
 
-// ---- Tool executor for the LLM ----
+// ---- 工具执行器：根据工具名称分发到具体的文档/文件操作实现 / Tool executor: dispatches tool calls to concrete document/file operation implementations ----
 async function toolExecutor(name: string, args: Record<string, unknown>): Promise<string> {
   if (name === "generate_document") {
     const result = await executeGenerateDocument(args);
@@ -149,7 +158,7 @@ async function toolExecutor(name: string, args: Record<string, unknown>): Promis
   return JSON.stringify({ error: `Unknown tool: ${name}` });
 }
 
-// ---- Send tool call card as SSE ----
+// ---- 发送工具调用卡片：当 Agent 调用了 generate_document 或 file_write 时，向前端推送包含文件下载链接的卡片消息 / Send tool call card: when an Agent calls generate_document or file_write, push a card message with file download link to the frontend ----
 async function sendToolCard(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
@@ -195,7 +204,7 @@ async function sendToolCard(
   }
 }
 
-// ---- Run a streaming agent phase (with tool calling) ----
+// ---- 运行流式 Agent 阶段：启动一个带工具调用的流式 LLM 调用，通过 SSE 将 token 逐字推送给前端 / Run a streaming Agent phase: starts a streaming LLM call (with optional tool calling) and pushes tokens to the frontend via SSE ----
 async function runStreamingAgent(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
@@ -242,11 +251,14 @@ async function runStreamingAgent(
   return { content, toolResults: result.toolResults || [] };
 }
 
-// ---- Main Handler ----
+// ═══════════════════════════════════════════════════════════════
+// 主 POST 处理器 — 接收用户消息，编排多阶段 A2A 协作流程 / Main POST handler — receives user message and orchestrates the multi-phase A2A collaboration workflow
+// ═══════════════════════════════════════════════════════════════
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
 
   try {
+    // ---- 请求解析：提取消息、历史记录、文件上下文，并校验 API Key / Request parsing: extract message, history, file context, and validate API Key ----
     const { message, history: prevHistory, fileContext } = await req.json();
     if (!message || typeof message !== "string") {
       return Response.json({ error: "message is required" }, { status: 400 });
@@ -267,7 +279,8 @@ export async function POST(req: NextRequest) {
         const history: AgentMessage[] = [];
 
         try {
-          // ═══ Phase 1: L1 Discovery ═══
+          // ═══ Router 思考：分析用户需求，匹配最优 Agent 组合 / Router thinking: analyze user needs and match the optimal Agent combination ═══
+          // ═══ 第一阶段：L1 发现层 — 由 Router 将需求解构，确定执行方案和任务分工 / Phase 1: L1 Discovery — Router deconstructs the requirement, determines execution plan and task division ═══
           const routerThinkingMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
             content: "分析需求中，正在匹配最优 Agent 组合...",
@@ -303,7 +316,7 @@ export async function POST(req: NextRequest) {
 
           const { fullContext } = buildContextString(prevHistory, message, routerAnalysis, selectedAgents, fileContext);
 
-          // ═══ Phase 2: Plan & Tasks ═══
+          // ═══ 第二阶段：Planner 规划 — 基于 Router 选中的 Agent 制定详细的执行计划和任务清单 / Phase 2: Planner — creates a detailed execution plan and task list based on the Router-selected Agents ═══
           const planThinkingMsg: AgentMessage = {
             speaker: "Planner", emoji: "📋",
             content: "制定执行计划中...",
@@ -342,7 +355,7 @@ export async function POST(req: NextRequest) {
           history.push(taskMsg);
           await writeSSE(controller, encoder, taskMsg);
 
-          // ═══ Phase 3: L3 Credit ═══
+          // ═══ 第三阶段：L3 信用层 — 验证所有选中 Agent 的可用性和信用状态 / Phase 3: L3 Credit — verify availability and credit status of all selected Agents ═══
           const creditMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
             content: `[A2A-Credit] ${selectedAgents.join("、")} 信用核查通过，进入 L4 协商阶段。`,
@@ -351,7 +364,7 @@ export async function POST(req: NextRequest) {
           history.push(creditMsg);
           await writeSSE(controller, encoder, creditMsg);
 
-          // ═══ Phase 4: L4 Negotiation — Round 1 (streaming + tool calling) ═══
+          // ═══ 第四阶段：L4 协商 — 第一轮，每个 Agent 流式输出分析结果，支持工具调用（生成文档、读写文件） / Phase 4: L4 Negotiation — Round 1, each Agent streams its analysis with tool calling support (document generation, file read/write) ═══
           for (let i = 0; i < selectedAgents.length; i++) {
             const agentName = selectedAgents[i];
             const taskInfo = tasks.find((t: { agent: string }) => t.agent === agentName);
@@ -402,7 +415,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ Phase 3.5: L5 Affection — Round 2 (streaming) ═══
+          // ═══ 第五阶段：L5 情感层 — 第二轮深度讨论，各 Agent 互相评审、补充和深化彼此的方案（至少 3 个 Agent 时触发） / Phase 5 (3.5): L5 Affection — Round 2 deep discussion, Agents review, supplement, and deepen each other's proposals (triggered when ≥ 3 Agents) ═══
           if (selectedAgents.length >= 3) {
             const r2Notice: AgentMessage = {
               speaker: "Router", emoji: "🔄",
@@ -440,7 +453,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ Phase 5: L6 Arbitration (streaming) ═══
+          // ═══ 第六阶段：L6 仲裁 — 仲裁组综合各 Agent 意见，输出最终结论（至少 2 个 Agent 时触发） / Phase 6: L6 Arbitration — the Arbitration group synthesizes all Agent opinions and outputs the final conclusion (triggered when ≥ 2 Agents) ═══
           if (selectedAgents.length >= 2) {
             const arbMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
             try {
@@ -460,7 +473,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ Phase 6: Quality Gate (streaming) ═══
+          // ═══ 第七阶段：质量门禁 — Quality Gate 检查协作结果，确保输出质量达标 / Phase 7: Quality Gate — checks the collaboration results to ensure output quality meets standards ═══
           const qgMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
           try {
             const { content } = await runStreamingAgent(
@@ -478,7 +491,7 @@ export async function POST(req: NextRequest) {
             await writeSSE(controller, encoder, qgMsg);
           }
 
-          // ═══ Phase 7: L7 Federation — 最终交付 (streaming + tools) ═══
+          // ═══ 第八阶段：L7 联邦交付 — 由首个 Agent 作为代表，综合所有讨论结果，生成最终交付物（支持工具调用） / Phase 8: L7 Federation — the first Agent acts as representative, synthesizes all discussion results, and generates the final deliverable (with tool calling support) ═══
           const outputAgentName = selectedAgents[0];
           const outputAgent = agents.find((a) => a.name === outputAgentName);
           if (outputAgent) {
@@ -511,7 +524,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ Phase 8: L2 Memory ═══
+          // ═══ 记忆保存：将本次协作的摘要写入 L2 共享记忆，供后续对话引用 / Memory save: write the summary of this collaboration into L2 shared memory for future conversation reference ═══
           const memMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
             content: `[A2A-Mem] 本次协作完成。涉及 ${selectedAgents.length} 个 Agent、${selectedAgents.length >= 2 ? "两轮" : "一轮"}讨论、${history.length} 条消息。结论已写入 L2 共享记忆。`,
@@ -520,6 +533,7 @@ export async function POST(req: NextRequest) {
           history.push(memMsg);
           await writeSSE(controller, encoder, memMsg);
 
+        // ═══ 错误处理：捕获流内任何阶段的异常，向前端推送错误消息 / Error handling: catch any exception from any phase within the stream and push an error message to the frontend ═══
         } catch (e) {
           const errMsg: AgentMessage = {
             speaker: "System", emoji: "⚠️",
@@ -527,6 +541,7 @@ export async function POST(req: NextRequest) {
             isSystem: true,
           };
           await writeSSE(controller, encoder, errMsg);
+        // ═══ 流清理：无论成功还是失败，确保关闭 SSE 流 / Stream cleanup: always close the SSE stream regardless of success or failure ═══
         } finally {
           controller.close();
         }
@@ -540,6 +555,7 @@ export async function POST(req: NextRequest) {
         Connection: "keep-alive",
       },
     });
+  // ═══ 外层错误处理：处理请求解析阶段的异常（如 JSON 解析失败） / Outer error handling: catches exceptions during request parsing (e.g., JSON parse failure) ═══
   } catch (e) {
     console.error("Chat API error:", e);
     return Response.json({ error: "Internal server error" }, { status: 500 });
