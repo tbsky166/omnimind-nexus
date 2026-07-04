@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
+  --color-ink: #0a0a0a;
+  --color-muted: #8a8a8a;
+  --color-accent: #1a1a1a;
+  --color-grid: #ebebeb;
+  --color-grid-hover: #d4d4d4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+/* Pixel grid background */
+.pixel-grid-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    repeating-linear-gradient(0deg, var(--color-grid), var(--color-grid) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg, var(--color-grid), var(--color-grid) 1px, transparent 1px, transparent 40px);
+}
+
+@media (max-width: 768px) {
+  .pixel-grid-bg {
+    background-image:
+      repeating-linear-gradient(0deg, var(--color-grid), var(--color-grid) 1px, transparent 1px, transparent 24px),
+      repeating-linear-gradient(90deg, var(--color-grid), var(--color-grid) 1px, transparent 1px, transparent 24px);
+  }
+}
+
+/* Pixel corners */
+.pixel-corners {
+  clip-path: polygon(
+    0px 4px, 1px 4px, 1px 2px, 2px 2px, 2px 1px, 4px 1px, 4px 0px,
+    calc(100% - 4px) 0px, calc(100% - 4px) 1px, calc(100% - 2px) 1px,
+    calc(100% - 2px) 2px, calc(100% - 1px) 2px, calc(100% - 1px) 4px,
+    100% 4px, 100% calc(100% - 4px), calc(100% - 1px) calc(100% - 4px),
+    calc(100% - 1px) calc(100% - 2px), calc(100% - 2px) calc(100% - 2px),
+    calc(100% - 2px) calc(100% - 1px), calc(100% - 4px) calc(100% - 1px),
+    calc(100% - 4px) 100%, 4px 100%, 4px calc(100% - 1px),
+    2px calc(100% - 1px), 2px calc(100% - 2px), 1px calc(100% - 2px),
+    1px calc(100% - 4px), 0px calc(100% - 4px)
+  );
+}
+
+/* Pixelated text */
+.pixel-text {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+/* Selection */
+::selection {
+  background: var(--color-ink);
+  color: #ffffff;
+}
+
+/* Pixel scrollbar for agent bubbles */
+.pixel-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.pixel-scrollbar::-webkit-scrollbar-track {
+  background: #f0f0f0;
+  border-left: 1px solid #ccc;
+}
+.pixel-scrollbar::-webkit-scrollbar-thumb {
+  background: #aaa;
+  border: 1px solid #888;
+}
+.pixel-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
