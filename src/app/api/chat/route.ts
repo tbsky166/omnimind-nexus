@@ -1,19 +1,17 @@
-// 主 A2A 聊天 API 路由 — 多 Agent 协作的核心入口，通过 SSE 流式返回各阶段输出 / Main A2A Chat API route — the core entry point for multi-agent collaboration, streaming each phase's output via SSE
+// 主 A2A 聊天 API 路由 — 多 Agent 协作的核心入口，通过 SSE 流式返回各阶段输出
+// ═══ Beta 优化流水线：Router(分析+规划) → Credit → Round1(并行) → Round2(互评) → Arbitration(仲裁) → QG+L7(交付) ═══
 import { NextRequest } from "next/server";
-// ---- 导入：提示词构建、LLM 调用、文档工具、Agent 数据 / Imports: prompt builders, LLM callers, document tools, agent data ----
 import {
   buildAgentPrompt,
   buildRouterPrompt,
   buildArbitratorPrompt,
   buildQualityGatePrompt,
   buildRound2Prompt,
-  buildPlannerPrompt,
   buildL7Prompt,
-  parsePlannerResponse,
+  parseRouterResponse,
   callLLM,
   callLLMStream,
   callLLMWithToolsStream,
-  parseRouterResponse,
   DOC_TOOLS,
   type ChatMessage,
 } from "@/lib/prompt";
@@ -279,11 +277,10 @@ export async function POST(req: NextRequest) {
         const history: AgentMessage[] = [];
 
         try {
-          // ═══ Router 思考：分析用户需求，匹配最优 Agent 组合 / Router thinking: analyze user needs and match the optimal Agent combination ═══
-          // ═══ 第一阶段：L1 发现层 — 由 Router 将需求解构，确定执行方案和任务分工 / Phase 1: L1 Discovery — Router deconstructs the requirement, determines execution plan and task division ═══
+          // ═══ 第一阶段：Router(分析+规划) — 解构需求、选择 Agent、制定执行计划 / Phase 1: Router (analyze + plan) — deconstruct, select, and plan ═══
           const routerThinkingMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
-            content: "分析需求中，正在匹配最优 Agent 组合...",
+            content: "分析需求中，正在匹配最优 Agent 组合并制定执行计划...",
             a2aLayer: "L1", isSystem: true,
           };
           history.push(routerThinkingMsg);
@@ -304,11 +301,11 @@ export async function POST(req: NextRequest) {
 
           const selectedAgents = routerResult?.selectedAgents || ["架构师", "编码 Agent", "安全 Agent"];
           const routerAnalysis = routerResult?.analysis || `已分析需求，匹配 ${selectedAgents.length} 个专业 Agent`;
-          const protocolFlow = routerResult?.protocolFlow || "标准 A2A 协作流程";
+          const plan = routerResult?.plan || "分析需求 → 分工协作 → 综合交付";
 
           const routerMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
-            content: `${routerAnalysis}\n\n选中：${selectedAgents.join("、")}\n\nA2A流程：${protocolFlow}`,
+            content: `${routerAnalysis}\n\n选中：${selectedAgents.join("、")}\n\n执行计划：${plan}`,
             a2aLayer: "L1", isSystem: true,
           };
           history.push(routerMsg);
@@ -316,46 +313,7 @@ export async function POST(req: NextRequest) {
 
           const { fullContext } = buildContextString(prevHistory, message, routerAnalysis, selectedAgents, fileContext);
 
-          // ═══ 第二阶段：Planner 规划 — 基于 Router 选中的 Agent 制定详细的执行计划和任务清单 / Phase 2: Planner — creates a detailed execution plan and task list based on the Router-selected Agents ═══
-          const planThinkingMsg: AgentMessage = {
-            speaker: "Planner", emoji: "📋",
-            content: "制定执行计划中...",
-            a2aLayer: "L1", isSystem: true,
-          };
-          history.push(planThinkingMsg);
-          await writeSSE(controller, encoder, planThinkingMsg);
-
-          const plannerMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
-          const plannerRaw = await callLLM(buildPlannerPrompt(), plannerMsgs, apiKey, baseUrl, model);
-          const plannerResult = parsePlannerResponse(plannerRaw.content);
-
-          const plan = plannerResult?.plan || "分析需求 → 分工协作 → 综合交付";
-          const tasks = plannerResult?.tasks || selectedAgents.map((a) => ({
-            name: `${a}分析`,
-            agent: a,
-            description: `从 ${a} 的专业角度分析用户需求`,
-          }));
-
-          const planMsg: AgentMessage = {
-            speaker: "Planner", emoji: "📋",
-            content: `【执行计划】\n${plan}`,
-            a2aLayer: "L1", isSystem: true,
-          };
-          history.push(planMsg);
-          await writeSSE(controller, encoder, planMsg);
-
-          const taskList = tasks.map((t: { name: string; agent: string }, i: number) =>
-            `  ${i + 1}. ${t.name} → ${t.agent}`
-          ).join("\n");
-          const taskMsg: AgentMessage = {
-            speaker: "Planner", emoji: "✅",
-            content: `【任务清单】\n${taskList}`,
-            a2aLayer: "L1", isSystem: true,
-          };
-          history.push(taskMsg);
-          await writeSSE(controller, encoder, taskMsg);
-
-          // ═══ 第三阶段：L3 信用层 — 验证所有选中 Agent 的可用性和信用状态 / Phase 3: L3 Credit — verify availability and credit status of all selected Agents ═══
+          // ═══ 第二阶段：L3 信用层 — 验证所有选中 Agent 的可用性和信用状态 / Phase 2: L3 Credit ═══
           const creditMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
             content: `[A2A-Credit] ${selectedAgents.join("、")} 信用核查通过，进入 L4 协商阶段。`,
@@ -364,10 +322,9 @@ export async function POST(req: NextRequest) {
           history.push(creditMsg);
           await writeSSE(controller, encoder, creditMsg);
 
-          // ═══ 第四阶段：L4 协商 — 第一轮，每个 Agent 流式输出分析结果，支持工具调用（生成文档、读写文件） / Phase 4: L4 Negotiation — Round 1, each Agent streams its analysis with tool calling support (document generation, file read/write) ═══
+          // ═══ 第三阶段：L4 协商 — 第一轮，每个 Agent 流式输出分析结果，支持工具调用 / Phase 3: L4 Round 1 ═══
           for (let i = 0; i < selectedAgents.length; i++) {
             const agentName = selectedAgents[i];
-            const taskInfo = tasks.find((t: { agent: string }) => t.agent === agentName);
             const agentData = agents.find((a) => a.name === agentName);
             const agentEmoji = agentData?.emoji || "🤖";
             const agentPrompt = buildAgentPrompt(agentName);
@@ -379,16 +336,10 @@ export async function POST(req: NextRequest) {
               continue;
             }
 
-            // Inject task + tool permissions
-            const taskedPrompt = taskInfo
-              ? agentPrompt.replace(
-                  "## 协作规则",
-                  `## 你的任务\n${taskInfo.name}：${taskInfo.description}\n\n## 工具权限\n你可以调用以下工具：\n- file_write: 创建/编辑文件（代码、配置、笔记等）\n- file_read: 读取其他 Agent 写的文件\n- generate_document: 生成正式 docx/xlsx 文档\n如果任务需要产出文件，直接调用工具。调用工具后简要说一句即可。\n\n## 协作规则`
-                )
-              : agentPrompt.replace(
-                  "## 协作规则",
-                  `## 工具权限\n你可以调用以下工具：\n- file_write: 创建/编辑文件\n- file_read: 读取文件\n- generate_document: 生成正式文档\n如果任务需要产出文件，直接调用工具。\n\n## 协作规则`
-                );
+            const taskedPrompt = agentPrompt.replace(
+              "## 协作规则",
+              `## 工具权限\n你可以调用以下工具：\n- file_write: 创建/编辑文件（代码、配置、笔记等）\n- file_read: 读取其他 Agent 写的文件\n- generate_document: 生成正式 docx/xlsx 文档\n如果任务需要产出文件，直接调用工具。调用工具后简要说一句即可。\n\n## 协作规则`
+            );
 
             const msgs = buildMessages(prevMessages, fullContext, formatHistory(history));
 
@@ -400,7 +351,6 @@ export async function POST(req: NextRequest) {
 
               history.push({ speaker: agentName, emoji: agentEmoji, content, a2aLayer: "L4" });
 
-              // Send tool cards
               for (const tr of toolResults) {
                 await sendToolCard(controller, encoder, agentName, agentEmoji, "L4", tr.name, tr.result);
               }
@@ -415,11 +365,11 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ 第五阶段：L5 情感层 — 第二轮深度讨论，各 Agent 互相评审、补充和深化彼此的方案（至少 3 个 Agent 时触发） / Phase 5 (3.5): L5 Affection — Round 2 deep discussion, Agents review, supplement, and deepen each other's proposals (triggered when ≥ 3 Agents) ═══
-          if (selectedAgents.length >= 3) {
+          // ═══ 第四阶段：L5 互评 — 第二轮深度讨论，各 Agent 互相评审、补充和深化（≥2 Agent 时触发） / Phase 4: L5 Cross-review ═══
+          if (selectedAgents.length >= 2) {
             const r2Notice: AgentMessage = {
               speaker: "Router", emoji: "🔄",
-              content: "[A2A-L5] 进入第二轮深度讨论。各 Agent 将互相评审、补充和深化彼此的方案。",
+              content: "[A2A-L5] 进入第二轮互评讨论。各 Agent 将互相评审、补充和深化彼此的方案。",
               a2aLayer: "L5", isSystem: true,
             };
             history.push(r2Notice);
@@ -453,7 +403,7 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ 第六阶段：L6 仲裁 — 仲裁组综合各 Agent 意见，输出最终结论（至少 2 个 Agent 时触发） / Phase 6: L6 Arbitration — the Arbitration group synthesizes all Agent opinions and outputs the final conclusion (triggered when ≥ 2 Agents) ═══
+          // ═══ 第五阶段：L6 仲裁 — 综合各 Agent 意见，输出最终结论（≥2 Agent 时触发） / Phase 5: L6 Arbitration ═══
           if (selectedAgents.length >= 2) {
             const arbMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
             try {
@@ -473,14 +423,25 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // ═══ 第七阶段：质量门禁 — Quality Gate 检查协作结果，确保输出质量达标 / Phase 7: Quality Gate — checks the collaboration results to ensure output quality meets standards ═══
-          const qgMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
+          // ═══ 第六阶段：质量门禁 + L7 联邦交付 — 综合所有讨论结果，生成最终交付物 / Phase 6: QG + L7 Federation ═══
+          const outputAgent = agents.find((a) => a.name === selectedAgents[0]);
+          const outputSystemPrompt = outputAgent
+            ? buildL7Prompt(outputAgent.name, outputAgent.role, outputAgent.personality, outputAgent.description)
+            : buildQualityGatePrompt();
+
+          const outMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
+
           try {
-            const { content } = await runStreamingAgent(
-              controller, encoder, buildQualityGatePrompt(), qgMsgs, apiKey, baseUrl, model,
-              "Quality Gate", "✅", "", false, 4096
+            const { content, toolResults } = await runStreamingAgent(
+              controller, encoder, outputSystemPrompt, outMsgs, apiKey, baseUrl, model,
+              "Quality Gate", "✅", "L7", true, 8192
             );
-            history.push({ speaker: "Quality Gate", emoji: "✅", content, isSystem: true });
+
+            history.push({ speaker: "Quality Gate", emoji: "✅", content, a2aLayer: "L7", isSystem: true });
+
+            for (const tr of toolResults) {
+              await sendToolCard(controller, encoder, "Quality Gate", "✅", "L7", tr.name, tr.result);
+            }
           } catch (e) {
             const qgMsg: AgentMessage = {
               speaker: "Quality Gate", emoji: "✅",
@@ -491,40 +452,7 @@ export async function POST(req: NextRequest) {
             await writeSSE(controller, encoder, qgMsg);
           }
 
-          // ═══ 第八阶段：L7 联邦交付 — 由首个 Agent 作为代表，综合所有讨论结果，生成最终交付物（支持工具调用） / Phase 8: L7 Federation — the first Agent acts as representative, synthesizes all discussion results, and generates the final deliverable (with tool calling support) ═══
-          const outputAgentName = selectedAgents[0];
-          const outputAgent = agents.find((a) => a.name === outputAgentName);
-          if (outputAgent) {
-            const outputSystemPrompt = buildL7Prompt(
-              outputAgent.name, outputAgent.role, outputAgent.personality, outputAgent.description
-            );
-
-            const outMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
-
-            try {
-              const { content, toolResults } = await runStreamingAgent(
-                controller, encoder, outputSystemPrompt, outMsgs, apiKey, baseUrl, model,
-                outputAgent.name, outputAgent.emoji, "L7", true, 8192
-              );
-
-              history.push({ speaker: outputAgent.name, emoji: outputAgent.emoji, content, a2aLayer: "L7" });
-
-              // Send tool cards for L7
-              for (const tr of toolResults) {
-                await sendToolCard(controller, encoder, outputAgent.name, outputAgent.emoji, "L7", tr.name, tr.result);
-              }
-            } catch (e) {
-              const errMsg: AgentMessage = {
-                speaker: outputAgent.name, emoji: outputAgent.emoji,
-                content: `[超时/错误] ${e instanceof Error ? e.message : "执行失败"}`,
-                a2aLayer: "L7", isSystem: true,
-              };
-              history.push(errMsg);
-              await writeSSE(controller, encoder, errMsg);
-            }
-          }
-
-          // ═══ 记忆保存：将本次协作的摘要写入 L2 共享记忆，供后续对话引用 / Memory save: write the summary of this collaboration into L2 shared memory for future conversation reference ═══
+          // ═══ 记忆保存：将本次协作摘要写入 L2 共享记忆 / Memory save: write collaboration summary to L2 ═══
           const memMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
             content: `[A2A-Mem] 本次协作完成。涉及 ${selectedAgents.length} 个 Agent、${selectedAgents.length >= 2 ? "两轮" : "一轮"}讨论、${history.length} 条消息。结论已写入 L2 共享记忆。`,

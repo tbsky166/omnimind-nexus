@@ -151,7 +151,7 @@ export function buildRouterPrompt(): string {
 ## 核心职责
 1. 分析用户需求的核心领域、复杂度和依赖关系
 2. 从 32 个 Agent 中选出最合适的 2-4 个，考虑互补性
-3. 规划 A2A 协议交互流程
+3. 制定 3-5 步的执行计划
 4. 如有上下文，考虑之前对话的延续性
 
 ## 需求分类规则（必须遵守）
@@ -205,7 +205,7 @@ ${agents.map((a) => `- ${a.emoji} ${a.name}（${a.role}，${a.category}类）`).
 - analysis: 需求分析（2-3句话，说明属于哪个分类）
 - selectedAgents: 选中的 Agent 名字列表（2-4个，必须使用中文原名）
 - reasoning: 每个 Agent 被选中的原因及协作顺序
-- protocolFlow: A2A 协议流程描述
+- plan: 3-5步执行计划，每步一句话
 
 直接输出 JSON，不要其他文字。`;
 }
@@ -234,20 +234,38 @@ export function buildQualityGatePrompt(): string {
 直接用自然语言回复，200-500字。不要输出 JSON。`;
 }
 
-// ---- Multi-round Discussion Prompt (Round 2) ----
+// ---- Multi-round Discussion Prompt (Round 2) / 多轮讨论提示词（第二轮） ----
 export function buildRound2Prompt(agentName: string, otherAgents: string[]): string {
   const basePrompt = buildAgentPrompt(agentName);
   if (!basePrompt) return "";
 
   return basePrompt.replace(
     "## 协作规则",
-    `## 第二轮讨论规则
-阅读所有其他 Agent 的发言，进行第二轮深度讨论：
-1. 引用并评价其他 Agent 的观点（${otherAgents.join("、")}）
-2. 明确指出你同意什么、不同意什么、为什么
-3. 在你的专长领域，深化或修正之前的方案
-4. 如果发现其他 Agent 的方案有遗漏或错误，直接指出并补充
-5. 最终给出一个更完善的版本
+    `## 第二轮交叉评审与辩论规则
+
+你正在参与一场多 Agent 协作讨论。第一轮各 Agent 已独立发表观点。现在进入第二轮交叉评审。
+
+### 你的任务
+1. **逐一点评**：阅读 ${otherAgents.join("、")} 的发言，对每位 Agent 的观点进行评价
+   - 哪些观点你完全认同？为什么？
+   - 哪些观点你不同意？给出具体理由
+   - 哪些观点有遗漏或需要补充？
+
+2. **深化方案**：在你的专业领域内，基于讨论结果给出更深入的分析
+   - 如果其他 Agent 提出的方案有漏洞，直接指出并提供修正
+   - 如果其他 Agent 遗漏了关键点，补充你的专业见解
+
+3. **辩论礼仪**：
+   - 尊重不同意见，但坚持基于事实和专业判断
+   - 引用具体内容而非泛泛而谈："XX Agent 提出的数据格式方案，我建议改为..."
+   - 有理有据地反驳，不要使用情绪化语言
+
+4. **收敛共识**：最终明确你的最终立场和建议
+   - 如果分歧已解决，说明你接受的方案
+   - 如果仍有分歧，说明你的坚持和底线
+
+### 格式
+用自然语言回复，150-300字。直接引用其他 Agent 的具体观点，展示你认真阅读了他们的发言。
 
 ## 协作规则`
   );
@@ -520,32 +538,9 @@ export async function callLLMWithToolsStream(
   return { ...finalResult, executedToolCalls: allToolCalls, toolResults: allToolResults };
 }
 
-// ---- Planner Prompt (Plan + Tasks) ----
-export function buildPlannerPrompt(): string {
-  return `你是 OmniMind Nexus 的 Planner。用户发来一个需求，Router 已选好 Agent。你需要制定执行计划并拆解为任务。
-
-## 可用 Agent
-${agents.map((a) => `- ${a.emoji} ${a.name}（${a.role}）`).join("\n")}
-
-## 要求
-1. 制定一个 3-5 步的执行计划，每步一句话
-2. 将计划拆解为具体任务，每个任务指定一个 Agent 负责
-3. 任务描述要具体，Agent 看到就知道该做什么
-
-## 回复格式（单行 JSON）
-{
-  "plan": "步骤1: xxx\n步骤2: yyy\n步骤3: zzz",
-  "tasks": [
-    {"name": "任务名称", "agent": "Agent名字（中文原名）", "description": "具体任务描述"}
-  ]
-}
-
-直接输出 JSON，不要其他文字。`;
-}
-
-// ---- L7 Federation Prompt ----
+// ---- L7 Federation + QG Prompt (合并质量门禁与联邦交付) / L7 Federation + QG Prompt (merged quality gate and federation delivery) ----
 export function buildL7Prompt(agentName: string, agentRole: string, agentPersonality: string, agentDescription: string): string {
-  return `你是 OmniMind Nexus 的最终交付负责人 **${agentName}**（${agentRole}），L7 Federation 层。
+  return `你是 OmniMind Nexus 的最终交付负责人 **${agentName}**（${agentRole}），L7 Federation + Quality Gate 层。
 
 ## 你的性格
 ${agentPersonality}
@@ -554,7 +549,7 @@ ${agentPersonality}
 ${agentDescription}
 
 ## 任务
-前面所有 Agent 已完成讨论 + 仲裁 + 质量审核。你的任务是：
+前面所有 Agent 已完成讨论 + 仲裁。你的任务是：
 1. 阅读所有对话记录，提取所有可交付成果
 2. 综合所有 Agent 的最佳方案，形成一个完整的最终交付物
 3. 判断用户意图：如果用户明确需要报告/文档/方案/表格等正式交付物，调用 generate_document 工具生成文件
@@ -570,27 +565,11 @@ ${agentDescription}
 }
 
 // ---- Parsers ----
-export function parsePlannerResponse(raw: string): {
-  plan: string;
-  tasks: { name: string; agent: string; description: string }[];
-} | null {
-  try {
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (parsed.plan && Array.isArray(parsed.tasks)) {
-      return parsed;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
 export function parseRouterResponse(raw: string): {
   analysis: string;
   selectedAgents: string[];
   reasoning: string;
-  protocolFlow: string;
+  plan: string;
 } | null {
   try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/);

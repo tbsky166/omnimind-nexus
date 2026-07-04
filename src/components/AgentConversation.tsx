@@ -2,8 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { conversationScenarios } from "@/data/agents";
-import type { ConversationScenario, ConversationMessage } from "@/data/agents";
+import type { ConversationMessage } from "@/data/agents";
 import sprites, { type SpriteData } from "@/data/sprites";
 
 // ── 主对话 UI 与流水线可视化 / Main conversation UI with pipeline visualization ──
@@ -441,96 +440,6 @@ function PipelineView({
   );
 }
 
-// ── 消息气泡组件（DemoChat 使用）/ MessageBubble component (for DemoChat) ──
-// 层级颜色映射 / Layer color mapping
-const layerColors: Record<string, string> = {
-  L1: "border-l-[#d4d4d4]", L2: "border-l-[#bfbfbf]", L3: "border-l-[#a3a3a3]",
-  L4: "border-l-[#8a8a8a]", L5: "border-l-[#707070]", L6: "border-l-[#525252]", L7: "border-l-[#1a1a1a]",
-};
-
-function MessageBubble({ msg, index, isStreaming = false }: {
-  msg: ConversationMessage; index: number; isStreaming?: boolean;
-}) {
-  const isUser = msg.isUser;
-  const isSystem = msg.isSystem;
-  const isFile = !!msg.fileUrl;
-  const layerClass = msg.a2aLayer ? layerColors[msg.a2aLayer] || "" : "";
-  const fmt = msg.fileFormat || msg.downloadName?.split(".").pop() || "docx";
-  const isXlsx = fmt === "xlsx";
-  const isDocx = fmt === "docx";
-  const isDocFile = isXlsx || isDocx;
-
-  if (isFile) {
-    const actionLabel = msg.toolAction || (isXlsx ? "生成 XLSX 文档" : isDocx ? "生成 DOCX 文档" : "工具调用");
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: index * 0.06, ease: [0.25, 0.1, 0.25, 1] }}
-        className="flex flex-col items-center my-4 max-w-[380px] w-full mx-auto"
-      >
-        <div className="flex items-center gap-2 mb-1.5 self-start px-1">
-          <span className="pixel-text text-[9px] tracking-[0.18em] uppercase text-ink/55 font-semibold">
-            🔧 {actionLabel}
-          </span>
-          <span className="pixel-text text-[9px] text-ink/30">— {msg.speaker}</span>
-        </div>
-        <a
-          href={msg.fileUrl} download={msg.downloadName}
-          className="flex items-center gap-4 px-5 py-3.5 border-2 border-ink bg-white hover:bg-ink hover:text-white transition-all duration-200 group w-full cursor-pointer text-left"
-        >
-          <div className="flex-shrink-0 w-10 h-10 flex items-center justify-center border border-gray-300 transition-colors duration-200"
-            style={{ backgroundColor: isDocFile ? (isXlsx ? "rgba(16,124,65,0.06)" : "rgba(24,90,189,0.06)") : "rgba(40,40,40,0.04)" }}>
-            {isDocFile ? (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" fill={isXlsx ? "#107c41" : "#185abd"} stroke="currentColor" strokeWidth="1.5" style={{ transition: "fill 0.2s" }} />
-                <path d="M14 2v6h6" stroke="currentColor" strokeWidth="1.5" fill="none" />
-                <text x={isXlsx ? "6" : "5"} y="17" fontSize={isXlsx ? "6.5" : "5.5"} fontWeight="bold" fill="white" style={{ transition: "fill 0.2s" }}>{isXlsx ? "xls" : "doc"}</text>
-              </svg>
-            ) : (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" />
-                <path d="M14 2v6h6" />
-                <text x="7" y="18" fontSize="6" fontWeight="bold" fill="currentColor" stroke="none">{fmt.slice(0, 3)}</text>
-              </svg>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="pixel-text text-[11px] tracking-[0.1em] text-ink/70 group-hover:text-white/70 truncate">{msg.downloadName}</p>
-            <p className="pixel-text text-[9px] tracking-[0.15em] uppercase text-ink/35 group-hover:text-white/50 mt-0.5">{fmt.toUpperCase()} — Click to download</p>
-          </div>
-          <div className="flex-shrink-0 w-7 h-7 flex items-center justify-center border border-gray-300 transition-colors duration-200">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </div>
-        </a>
-      </motion.div>
-    );
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: isUser ? 20 : -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.4, delay: index * 0.04, ease: [0.25, 0.1, 0.25, 1] }}
-      className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}
-    >
-      <div className={`flex-shrink-0 w-7 h-7 flex items-center justify-center text-xs select-none ${isSystem ? "opacity-50" : ""}`}>{msg.emoji}</div>
-      <div className={`max-w-[80%] md:max-w-[65%] px-4 py-2.5 border-l-2 ${isUser ? "bg-ink text-white border-l-ink" : isSystem ? "bg-[#fafafa] text-ink/50 border-l-grid" : `bg-white text-ink/80 ${layerClass}`}`}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className={`pixel-text text-[10px] tracking-[0.12em] ${isUser ? "text-white/60" : isSystem ? "text-ink/45" : "text-ink/50"}`}>{msg.speaker}</span>
-          {msg.a2aLayer && <span className="pixel-text text-[9px] tracking-[0.15em] text-ink/40">{msg.a2aLayer}</span>}
-        </div>
-        <p className={`text-xs leading-relaxed ${isUser ? "text-white/90" : ""}`}>
-          {msg.content}
-          {isStreaming && <motion.span className="inline-block w-[2px] h-[10px] bg-ink/60 ml-0.5 align-middle" animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.8, repeat: Infinity }} />}
-        </p>
-      </div>
-    </motion.div>
-  );
-}
-
 // ── 实时对话组件 / LiveChat component ──
 // 会话元数据类型 / Session metadata type
 interface SessionMeta { id: string; title: string; createdAt: number; updatedAt: number; messageCount: number; }
@@ -743,93 +652,26 @@ function LiveChat() {
   );
 }
 
-// ── 演示对话组件（预录制场景回放）/ DemoChat component (prerecorded scenario playback) ──
-function DemoChat({ scenario }: { scenario: ConversationScenario }) {
-  const [visibleMessages, setVisibleMessages] = useState(0);
-  const [hasStarted, setHasStarted] = useState(false);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const totalMessages = scenario.messages.length;
-
-  const startConversation = useCallback(() => { setHasStarted(true); setVisibleMessages(0); }, []);
-  useEffect(() => { if (!hasStarted) return; setVisibleMessages(0); const timer = setInterval(() => { setVisibleMessages((prev) => { if (prev < totalMessages) return prev + 1; clearInterval(timer); return prev; }); }, 700); return () => clearInterval(timer); }, [hasStarted, totalMessages]);
-  useEffect(() => { const el = messagesContainerRef.current; if (el) el.scrollTop = el.scrollHeight; }, [visibleMessages]);
-
-  return (
-    <div className="flex flex-col h-[500px]">
-      <div ref={messagesContainerRef} className="flex-1 p-4 md:p-6 space-y-4 overflow-y-auto">
-        <div key={scenario.id}>{scenario.messages.slice(0, visibleMessages).map((msg, i) => (<MessageBubble key={i} msg={msg} index={i} />))}</div>
-      </div>
-      <div className="flex items-center justify-between px-4 py-2.5 border-t border-grid bg-[#fafafa]">
-        <div className="flex items-center gap-3">
-          {!hasStarted || visibleMessages >= totalMessages ? (
-            <button onClick={startConversation} className="pixel-text text-[10px] tracking-[0.15em] uppercase text-ink/60 hover:text-ink transition-colors flex items-center gap-1.5">
-              <span className="w-0 h-0 border-l-[7px] border-l-ink/60 border-y-[5px] border-y-transparent" />{visibleMessages >= totalMessages ? "REPLAY" : "PLAY"}</button>
-          ) : (
-            <span className="flex items-center gap-2 pixel-text text-[10px] tracking-[0.15em] text-ink/45 uppercase">
-              <motion.span className="w-1.5 h-3 bg-ink/30 inline-block" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 0.8, repeat: Infinity }} />Running...</span>
-          )}
-        </div>
-        <div className="hidden md:flex items-center gap-3">
-          {["L1", "L2", "L3", "L4", "L5", "L6", "L7"].map((layer) => (
-            <div key={layer} className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5" style={{ backgroundColor: layer === "L7" ? "#1a1a1a" : layer === "L6" ? "#525252" : layer === "L5" ? "#707070" : layer === "L4" ? "#8a8a8a" : layer === "L3" ? "#a3a3a3" : layer === "L2" ? "#bfbfbf" : "#d4d4d4" }} />
-              <span className="pixel-text text-[9px] text-ink/40">{layer}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── 主组件：Agent 对话入口，包含场景切换标签页 / Main component: Agent conversation entry with scenario tabs ──
-const allTabs = [...conversationScenarios.map((s) => ({ id: s.id, subtitle: s.subtitle, title: s.title, isLive: false })), { id: "live", subtitle: "Real-time", title: "Live", isLive: true }];
-
-// ── 场景标签页组件 / ScenarioTab component ──
-function ScenarioTab({ tab, isActive, onClick, index }: { tab: (typeof allTabs)[0]; isActive: boolean; onClick: () => void; index: number }) {
-  return (
-    <motion.button onClick={onClick}
-      className={`relative flex-1 text-left px-5 py-4 border-b-2 transition-colors duration-200 ${isActive ? "border-ink" : "border-grid hover:border-grid-hover"}`}
-      initial={{ opacity: 0, y: 8 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.4, delay: index * 0.08 }}>
-      <div className="flex items-center gap-2">
-        <span className={`block pixel-text text-[11px] tracking-[0.15em] uppercase mb-1 ${isActive ? "text-ink" : "text-ink/40"}`}>{tab.subtitle}</span>
-        {tab.isLive && <span className="w-[5px] h-[5px] bg-ink animate-pulse" />}
-      </div>
-      <span className={`block text-sm font-semibold tracking-[-0.01em] ${isActive ? "text-ink" : "text-ink/50"}`}>{tab.title}</span>
-    </motion.button>
-  );
-}
-
-// 对话系统入口组件 / Agent conversation entry component
+// ── 主组件：Agent 对话入口 / Main component: Agent conversation entry ──
 export default function AgentConversation() {
-  const [activeIndex, setActiveIndex] = useState(allTabs.length - 1);
-  const activeTab = allTabs[activeIndex];
-  const liveDescription = "输入任意任务，真实的 LLM 将驱动多个 Agent 通过 A2A 协议协作完成。需要配置 OPENAI_API_KEY。";
-
   return (
     <section className="relative z-10 px-8 py-32 max-w-5xl mx-auto">
       <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-20%" }} transition={{ duration: 0.8, ease: [0.25, 0.1, 0.25, 1] }} className="mb-16">
-        <p className="pixel-text text-[10px] tracking-[0.3em] text-ink/50 uppercase mb-4">Live Demo</p>
-        <h2 className="text-3xl md:text-4xl font-bold tracking-[-0.02em] text-ink mb-3">Agent 对话系统演示</h2>
-        <p className="pixel-text text-sm text-ink/45 max-w-lg">观察 A2A 协议如何驱动多个 Agent 之间进行真实的发现、协商、辩论、仲裁与联邦决策。</p>
+        <p className="pixel-text text-[10px] tracking-[0.3em] text-ink/50 uppercase mb-4">OmniMind Nexus Beta</p>
+        <h2 className="text-3xl md:text-4xl font-bold tracking-[-0.02em] text-ink mb-3">Agent 协作系统</h2>
+        <p className="pixel-text text-sm text-ink/45 max-w-lg">输入任务，多 Agent 通过 A2A 协议协作完成。需要配置 OPENAI_API_KEY。</p>
       </motion.div>
-      <motion.div className="flex flex-wrap border-b border-grid mb-8" initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ duration: 0.6, delay: 0.2 }}>
-        {allTabs.map((tab, i) => (<ScenarioTab key={tab.id} tab={tab} isActive={activeIndex === i} onClick={() => setActiveIndex(i)} index={i} />))}
-      </motion.div>
-      <motion.p key={activeTab.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="pixel-text text-[11px] text-ink/50 leading-relaxed mb-8 px-1">
-        {activeTab.isLive ? liveDescription : conversationScenarios[activeIndex].description}
-      </motion.p>
       <div className="border-2 border-ink bg-white overflow-hidden" style={{ boxShadow: "4px 4px 0 #1a1a1a" }}>
         <div className="flex items-center gap-2 px-4 py-2.5 border-b-2 border-ink bg-[#fafafa]">
           <div className="flex gap-1.5">
-            <div className={`w-3 h-3 ${activeTab.isLive ? "bg-green-600" : "bg-ink"}`} style={{ imageRendering: "pixelated" }} />
+            <div className="w-3 h-3 bg-green-600" style={{ imageRendering: "pixelated" }} />
             <div className="w-3 h-3 bg-grid-hover" style={{ imageRendering: "pixelated" }} />
             <div className="w-3 h-3 bg-grid" style={{ imageRendering: "pixelated" }} />
           </div>
-          <span className="pixel-text text-[10px] tracking-[0.15em] text-ink/45 ml-2">a2a://{activeTab.id}.omnimind.nexus</span>
-          {activeTab.isLive && <span className="pixel-text text-[9px] text-green-700 ml-2">● LIVE</span>}
+          <span className="pixel-text text-[10px] tracking-[0.15em] text-ink/45 ml-2">a2a://live.omnimind.nexus</span>
+          <span className="pixel-text text-[9px] text-green-700 ml-2">● LIVE</span>
         </div>
-        {activeTab.isLive ? <LiveChat key="live" /> : <DemoChat key={activeTab.id} scenario={conversationScenarios[activeIndex]} />}
+        <LiveChat />
       </div>
     </section>
   );
