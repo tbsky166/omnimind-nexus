@@ -1068,6 +1068,12 @@ function LiveChat() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const uploadedFileRef = useRef(uploadedFile);
+  uploadedFileRef.current = uploadedFile;
+  const currentSessionIdRef = useRef(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
 
   useEffect(() => {
     fetch("/api/sessions").then((r) => r.json()).then((d) => { if (d.sessions) setSessions(d.sessions); }).catch(() => {});
@@ -1126,15 +1132,17 @@ function LiveChat() {
     const text = input.trim();
     if (!text || loading) return;
     setInput(""); setError(null); setLoading(true);
-    const sessionId = currentSessionId || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    if (!currentSessionId) setCurrentSessionId(sessionId);
+    const currentMessages = messagesRef.current;
+    const currentUploadedFile = uploadedFileRef.current;
+    const sessionId = currentSessionIdRef.current || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (!currentSessionIdRef.current) setCurrentSessionId(sessionId);
 
-    const userMsg: ConversationMessage = { speaker: "YOU", emoji: "👤", content: uploadedFile ? `[${uploadedFile.name}] ${text}` : text, isUser: true };
+    const userMsg: ConversationMessage = { speaker: "YOU", emoji: "👤", content: currentUploadedFile ? `[${currentUploadedFile.name}] ${text}` : text, isUser: true };
     setMessages((prev) => [...prev, userMsg]);
 
     try {
-      const body: Record<string, unknown> = { message: text, history: messages };
-      if (uploadedFile) body.fileContext = uploadedFile.content;
+      const body: Record<string, unknown> = { message: text, history: currentMessages };
+      if (currentUploadedFile) body.fileContext = currentUploadedFile.content;
       const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || `HTTP ${res.status}`); }
       const reader = res.body?.getReader();
@@ -1181,7 +1189,7 @@ function LiveChat() {
       setLoading(false);
       setMessages((prev) => { saveSession(prev, sessionId); return prev; });
     }
-  }, [input, loading, messages, uploadedFile, currentSessionId, saveSession]);
+  }, [input, loading, saveSession]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) handleSend(e); };
   const handleNewSession = () => { setMessages([]); setCurrentSessionId(""); setUploadedFile(null); setError(null); setShowSessions(false); };

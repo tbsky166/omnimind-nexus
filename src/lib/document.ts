@@ -106,7 +106,7 @@ export function listWorkspaceFiles(): string[] {
 
 // ---- DOCX Generator ----
 export async function generateDocxBuffer(content: string, title: string): Promise<Buffer> {
-  const paragraphs = content.split("\n").filter(Boolean);
+  const paragraphs = content.split("\n");
 
   const children = paragraphs.map((line) => {
     if (line.startsWith("# ")) {
@@ -130,11 +130,14 @@ export async function generateDocxBuffer(content: string, title: string): Promis
         spacing: { before: 200, after: 100 },
       });
     }
-    if (line.startsWith("```")) {
+    if (line.trim().startsWith("```")) {
       return new Paragraph({
-        children: [new TextRun({ text: line.replace(/```\w*/, "// "), font: "Courier New", size: 18, italics: true })],
-        spacing: { before: 80, after: 80 },
+        children: [new TextRun({ text: line.replace(/```\w*/, ""), font: "Courier New", size: 18, color: "888888" })],
+        spacing: { before: 40, after: 40 },
       });
+    }
+    if (!line.trim()) {
+      return new Paragraph({ spacing: { before: 60, after: 60 } });
     }
     if (line.includes("**")) {
       const parts = line.split(/(\*\*.*?\*\*)/g);

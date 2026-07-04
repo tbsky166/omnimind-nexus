@@ -543,6 +543,32 @@ ${agents.map((a) => `- ${a.emoji} ${a.name}（${a.role}）`).join("\n")}
 直接输出 JSON，不要其他文字。`;
 }
 
+// ---- L7 Federation Prompt ----
+export function buildL7Prompt(agentName: string, agentRole: string, agentPersonality: string, agentDescription: string): string {
+  return `你是 OmniMind Nexus 的最终交付负责人 **${agentName}**（${agentRole}），L7 Federation 层。
+
+## 你的性格
+${agentPersonality}
+
+## 你的专长
+${agentDescription}
+
+## 任务
+前面所有 Agent 已完成讨论 + 仲裁 + 质量审核。你的任务是：
+1. 阅读所有对话记录，提取所有可交付成果
+2. 综合所有 Agent 的最佳方案，形成一个完整的最终交付物
+3. 判断用户意图：如果用户明确需要报告/文档/方案/表格等正式交付物，调用 generate_document 工具生成文件
+   - 文字类内容（报告/方案/文案）→ format: "docx"
+   - 数据表格类内容 → format: "xlsx"
+   - title: 有意义的文档标题
+   - content: 完整的 Markdown 格式内容
+4. 如果用户只是咨询/讨论/闲聊，不需要生成文档，直接给出最终回复即可
+
+## 重要
+- 只在用户需要正式交付物时才调用工具，不要无脑生成文档
+- 不要输出 JSON 格式，直接自然语言回复`;
+}
+
 // ---- Parsers ----
 export function parsePlannerResponse(raw: string): {
   plan: string;
@@ -560,32 +586,6 @@ export function parsePlannerResponse(raw: string): {
     return null;
   }
 }
-export function parseAgentMessage(raw: string): {
-  speaker: string;
-  emoji: string;
-  content: string;
-  a2aLayer?: string;
-  isSystem?: boolean;
-} | null {
-  try {
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const parsed = JSON.parse(jsonMatch[0]);
-    if (parsed.speaker && parsed.content) {
-      return {
-        speaker: parsed.speaker,
-        emoji: parsed.emoji || "🤖",
-        content: parsed.content,
-        a2aLayer: parsed.a2aLayer,
-        isSystem: parsed.isSystem,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export function parseRouterResponse(raw: string): {
   analysis: string;
   selectedAgents: string[];

@@ -6,6 +6,7 @@ import {
   buildQualityGatePrompt,
   buildRound2Prompt,
   buildPlannerPrompt,
+  buildL7Prompt,
   parsePlannerResponse,
   callLLM,
   callLLMStream,
@@ -55,8 +56,8 @@ function streamDelta(controller: ReadableStreamDefaultController, encoder: TextE
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
 }
 
-function streamEnd(controller: ReadableStreamDefaultController, encoder: TextEncoder, speaker: string, emoji: string, content: string, a2aLayer: string) {
-  const msg: AgentMessage = { speaker, emoji, content, a2aLayer, streaming: "end" };
+function streamEnd(controller: ReadableStreamDefaultController, encoder: TextEncoder, speaker: string, emoji: string, a2aLayer: string) {
+  const msg: AgentMessage = { speaker, emoji, content: "", a2aLayer, streaming: "end" };
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
 }
 
@@ -235,8 +236,8 @@ async function runStreamingAgent(
   // Clean up content — strip code blocks, trim
   const content = result.content.replace(/```[\s\S]*?```/g, "").trim() || "已完成。";
 
-  // Signal stream end with final content
-  streamEnd(controller, encoder, speaker, emoji, content, a2aLayer);
+  // Signal stream end
+  streamEnd(controller, encoder, speaker, emoji, a2aLayer);
 
   return { content, toolResults: result.toolResults || [] };
 }
@@ -344,7 +345,7 @@ export async function POST(req: NextRequest) {
           // ═══ Phase 3: L3 Credit ═══
           const creditMsg: AgentMessage = {
             speaker: "Router", emoji: "🔀",
-            content: `[A2A-Credit] ${selectedAgents.join("、")} 信用核查通过。\n各 Agent 历史协作评分：${selectedAgents.map((a) => `${a} ★★★★★`).join(" | ")}\nL3 信用确认完成，进入 L4 协商阶段。`,
+            content: `[A2A-Credit] ${selectedAgents.join("、")} 信用核查通过，进入 L4 协商阶段。`,
             a2aLayer: "L3", isSystem: true,
           };
           history.push(creditMsg);
@@ -402,7 +403,7 @@ export async function POST(req: NextRequest) {
           }
 
           // ═══ Phase 3.5: L5 Affection — Round 2 (streaming) ═══
-          if (selectedAgents.length >= 2) {
+          if (selectedAgents.length >= 3) {
             const r2Notice: AgentMessage = {
               speaker: "Router", emoji: "🔄",
               content: "[A2A-L5] 进入第二轮深度讨论。各 Agent 将互相评审、补充和深化彼此的方案。",
@@ -481,28 +482,9 @@ export async function POST(req: NextRequest) {
           const outputAgentName = selectedAgents[0];
           const outputAgent = agents.find((a) => a.name === outputAgentName);
           if (outputAgent) {
-            const outputSystemPrompt = `你是 OmniMind Nexus 的最终交付负责人 **${outputAgent.name}**（${outputAgent.role}），L7 Federation 层。
-
-## 你的性格
-${outputAgent.personality}
-
-## 你的专长
-${outputAgent.description}
-
-## 任务
-前面所有 Agent 已完成两轮讨论 + 仲裁 + 质量审核。你的任务是：
-1. 阅读所有对话记录，提取所有可交付成果
-2. 综合所有 Agent 的最佳方案，形成一个完整的最终交付物
-3. 判断用户意图：如果用户明确需要报告/文档/方案/表格等正式交付物，调用 generate_document 工具生成文件
-   - 文字类内容（报告/方案/文案）→ format: "docx"
-   - 数据表格类内容 → format: "xlsx"
-   - title: 有意义的文档标题
-   - content: 完整的 Markdown 格式内容
-4. 如果用户只是咨询/讨论/闲聊，不需要生成文档，直接给出最终回复即可
-
-## 重要
-- 只在用户需要正式交付物时才调用工具，不要无脑生成文档
-- 不要输出 JSON 格式，直接自然语言回复`;
+            const outputSystemPrompt = buildL7Prompt(
+              outputAgent.name, outputAgent.role, outputAgent.personality, outputAgent.description
+            );
 
             const outMsgs = buildMessages(prevMessages, fullContext, formatHistory(history));
 
@@ -515,51 +497,8 @@ ${outputAgent.description}
               history.push({ speaker: outputAgent.name, emoji: outputAgent.emoji, content, a2aLayer: "L7" });
 
               // Send tool cards for L7
-              if (toolResults.length > 0) {
-                for (const tr of toolResults) {
-                  await sendToolCard(controller, encoder, outputAgent.name, outputAgent.emoji, "L7", tr.name, tr.result);
-                }
-              } else {
-                // Fallback: check user intent for document generation
-                const userWantsDoc = /生成|输出|导出|下载|写(一份|个)|制作|帮我|报告|文档|docx|xlsx|表格|方案|清单/i.test(message);
-
-                if (userWantsDoc) {
-                  const isXlsx = /xlsx|表格|excel|spreadsheet/i.test(message + content);
-                  const format = isXlsx ? "xlsx" : "docx";
-                  const titleMatch = content.match(/《([^》]+)》/) ||
-                    message.match(/(?:报告|文档|方案|清单|表格)[:：]?\s*([^\n，。!?])/);
-                  const title = titleMatch?.[1]?.trim() || message.slice(0, 30);
-
-                  const allAgentOutputs = history
-                    .filter((m) => !m.isSystem || m.a2aLayer === "L7")
-                    .map((m) => `## ${m.speaker}${m.a2aLayer ? ` (${m.a2aLayer})` : ""}\n${m.content}`)
-                    .join("\n\n");
-
-                  const docContent = content.length > 500
-                    ? content
-                    : `${allAgentOutputs}\n\n## 最终交付\n${content}`;
-
-                  try {
-                    const genResult = await executeGenerateDocument({ format, title, content: docContent });
-                    if (genResult.success) {
-                      const docMsg: AgentMessage = {
-                        speaker: outputAgent.name,
-                        emoji: outputAgent.emoji,
-                        content: genResult.fileName,
-                        a2aLayer: "L7",
-                        isSystem: true,
-                        toolName: "generate_document",
-                        toolAction: `生成 ${genResult.format?.toUpperCase()} 文档`,
-                        fileUrl: genResult.fileUrl,
-                        downloadName: genResult.fileName,
-                        fileFormat: genResult.format,
-                      };
-                      await writeSSE(controller, encoder, docMsg);
-                    }
-                  } catch (e) {
-                    console.error("[L7] Document generation error:", e);
-                  }
-                }
+              for (const tr of toolResults) {
+                await sendToolCard(controller, encoder, outputAgent.name, outputAgent.emoji, "L7", tr.name, tr.result);
               }
             } catch (e) {
               const errMsg: AgentMessage = {
