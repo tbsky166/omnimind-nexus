@@ -362,6 +362,78 @@ export interface MemoryConfig {
   priority: number;         // 优先级
 }
 
+// ── 蜂群智能配置 / Swarm Intelligence Config ──
+
+/** 蜂群配置 / Swarm configuration */
+export interface SwarmDSLConfig {
+  enabled: boolean;              // 是否启用蜂群模式
+  population_size: number;       // 蜂群规模
+  max_iterations: number;        // 最大迭代次数
+  convergence_threshold: number; // 收敛阈值
+  exploration_ratio: number;     // 探索比例
+  pheromone_weight: number;      // 信息素权重
+  social_weight: number;         // 社会学习权重
+  cognitive_weight: number;      // 认知权重
+  inertia_weight: number;        // 惯性权重
+  dimensions: number;            // 解空间维度
+  bounds: [number, number];      // 搜索边界
+  fitness_function: string;      // 适应度函数名
+  waggle_dance: boolean;         // 是否启用舞动通信
+  evaporation_rate: number;      // 信息素蒸发速率
+}
+
+// ── 进化引擎配置 / Evolution Engine Config ──
+
+/** 进化配置 / Evolution configuration */
+export interface EvolutionDSLConfig {
+  enabled: boolean;              // 是否启用进化
+  population_size: number;       // 种群大小
+  elite_count: number;           // 精英保留数
+  crossover_rate: number;        // 交叉率
+  mutation_rate: number;         // 突变率
+  tournament_size: number;       // 锦标赛大小
+  max_generations: number;       // 最大代数
+  target_fitness: number;        // 目标适应度
+  stagnation_limit: number;      // 停滞上限
+  genes_to_evolve: string[];     // 要进化的基因列表
+  fitness_function: string;      // 适应度函数名
+  auto_trigger: boolean;         // 是否自动触发进化
+  trigger_interval: number;      // 触发间隔（轮次）
+}
+
+// ── 知识图谱配置 / Knowledge Graph Config ──
+
+/** 知识图谱配置 / Knowledge graph configuration */
+export interface KnowledgeGraphDSLConfig {
+  enabled: boolean;              // 是否启用知识图谱
+  auto_extract: boolean;         // 是否自动从对话中提取实体
+  persistence_path: string;      // 持久化路径
+  forgetting_halflife_days: number; // 遗忘半衰期（天）
+  max_entities: number;          // 最大实体数
+  confidence_threshold: number;  // 置信度阈值
+  relation_types: string[];      // 允许的关系类型
+  auto_contradiction_check: boolean; // 是否自动检测矛盾
+  merge_similar: boolean;        // 是否合并相似实体
+  similarity_threshold: number;  // 相似度阈值
+}
+
+// ── 元认知配置 / Metacognition Config ──
+
+/** 元认知配置 / Metacognition configuration */
+export interface MetacognitionDSLConfig {
+  enabled: boolean;              // 是否启用元认知
+  track_thinking: boolean;       // 是否记录思维链
+  detect_biases: boolean;        // 是否检测认知偏差
+  calibrate_confidence: boolean; // 是否校准置信度
+  auto_reflect: boolean;         // 是否自动反思
+  reflect_interval: number;      // 反思间隔（轮次）
+  min_confidence: number;        // 最低置信度阈值
+  bias_severity_threshold: number; // 偏差严重度阈值
+  max_thinking_steps: number;    // 最大思维步骤数
+  attention_monitoring: boolean; // 是否监控注意力分配
+  blocked_biases: string[];      // 要忽略的偏差类型
+}
+
 /** 完整的 Agent 配置 / Complete Agent configuration */
 export interface AgentDSLConfig {
   name: string;
@@ -385,6 +457,11 @@ export interface AgentDSLConfig {
   communication?: CommunicationConfig; // 通信配置
   memory?: MemoryConfig;      // 内存配置
   variables?: Record<string, DSLValue>; // 变量定义
+  // 创新功能字段 / Novel feature fields
+  swarm?: SwarmDSLConfig;          // 蜂群智能
+  evolution?: EvolutionDSLConfig;   // 进化引擎
+  knowledge_graph?: KnowledgeGraphDSLConfig; // 知识图谱
+  metacognition?: MetacognitionDSLConfig;    // 元认知
 }
 
 // ── 预设值定义 / Preset Value Definitions ──
@@ -625,6 +702,30 @@ function parseBlock(lines: string[], startIdx: number): { config: Record<string,
         i = nested.endIdx + 1;
         continue;
       }
+      if (blockKey === "swarm") {
+        const nested = parseBlock(lines, i + 1);
+        config["swarm"] = parseSwarmConfig(nested.config);
+        i = nested.endIdx + 1;
+        continue;
+      }
+      if (blockKey === "evolution" || blockKey === "evolve") {
+        const nested = parseBlock(lines, i + 1);
+        config["evolution"] = parseEvolutionConfig(nested.config);
+        i = nested.endIdx + 1;
+        continue;
+      }
+      if (blockKey === "knowledge_graph" || blockKey === "kg") {
+        const nested = parseBlock(lines, i + 1);
+        config["knowledge_graph"] = parseKnowledgeGraphConfig(nested.config);
+        i = nested.endIdx + 1;
+        continue;
+      }
+      if (blockKey === "metacognition" || blockKey === "meta") {
+        const nested = parseBlock(lines, i + 1);
+        config["metacognition"] = parseMetacognitionConfig(nested.config);
+        i = nested.endIdx + 1;
+        continue;
+      }
       if (blockKey === "variables" || blockKey === "vars") {
         const nested = parseBlock(lines, i + 1);
         config["variables"] = nested.config;
@@ -857,6 +958,80 @@ function parseMemoryConfig(config: Record<string, unknown>): MemoryConfig {
     ttl_seconds: (config.ttl as number) || (config.ttl_seconds as number) || 3600,
     search_method: (config.search as string) || (config.search_method as string) || "hybrid",
     priority: (config.priority as number) || 50,
+  };
+}
+
+// ── 创新功能解析器：蜂群、进化、知识图谱、元认知 / Novel feature parsers: swarm, evolution, knowledge graph, metacognition ──
+
+/** 解析蜂群配置 / Parse swarm configuration */
+function parseSwarmConfig(config: Record<string, unknown>): SwarmDSLConfig {
+  return {
+    enabled: (config.enabled as boolean) ?? true,
+    population_size: (config.population_size as number) || (config.population as number) || 20,
+    max_iterations: (config.max_iterations as number) || (config.iterations as number) || 100,
+    convergence_threshold: (config.convergence_threshold as number) || (config.threshold as number) || 0.01,
+    exploration_ratio: (config.exploration_ratio as number) || (config.exploration as number) || 0.3,
+    pheromone_weight: (config.pheromone_weight as number) || 0.5,
+    social_weight: (config.social_weight as number) || 0.3,
+    cognitive_weight: (config.cognitive_weight as number) || 0.2,
+    inertia_weight: (config.inertia_weight as number) || (config.inertia as number) || 0.7,
+    dimensions: (config.dimensions as number) || 5,
+    bounds: (config.bounds as [number, number]) || [0, 1],
+    fitness_function: (config.fitness_function as string) || (config.fitness as string) || "evaluate_solution",
+    waggle_dance: (config.waggle_dance as boolean) ?? (config.dance as boolean) ?? true,
+    evaporation_rate: (config.evaporation_rate as number) || (config.evaporation as number) || 0.03,
+  };
+}
+
+/** 解析进化配置 / Parse evolution configuration */
+function parseEvolutionConfig(config: Record<string, unknown>): EvolutionDSLConfig {
+  return {
+    enabled: (config.enabled as boolean) ?? true,
+    population_size: (config.population_size as number) || (config.population as number) || 30,
+    elite_count: (config.elite_count as number) || (config.elite as number) || 3,
+    crossover_rate: (config.crossover_rate as number) || (config.crossover as number) || 0.8,
+    mutation_rate: (config.mutation_rate as number) || (config.mutation as number) || 0.1,
+    tournament_size: (config.tournament_size as number) || (config.tournament as number) || 4,
+    max_generations: (config.max_generations as number) || (config.generations as number) || 50,
+    target_fitness: (config.target_fitness as number) || (config.target as number) || 0.95,
+    stagnation_limit: (config.stagnation_limit as number) || (config.stagnation as number) || 10,
+    genes_to_evolve: (config.genes_to_evolve as string[]) || (config.genes as string[]) || [],
+    fitness_function: (config.fitness_function as string) || (config.fitness as string) || "evaluate_fitness",
+    auto_trigger: (config.auto_trigger as boolean) ?? true,
+    trigger_interval: (config.trigger_interval as number) || (config.interval as number) || 10,
+  };
+}
+
+/** 解析知识图谱配置 / Parse knowledge graph configuration */
+function parseKnowledgeGraphConfig(config: Record<string, unknown>): KnowledgeGraphDSLConfig {
+  return {
+    enabled: (config.enabled as boolean) ?? true,
+    auto_extract: (config.auto_extract as boolean) ?? (config.auto as boolean) ?? true,
+    persistence_path: (config.persistence_path as string) || (config.path as string) || "./knowledge_graph.json",
+    forgetting_halflife_days: (config.forgetting_halflife_days as number) || (config.halflife as number) || 7,
+    max_entities: (config.max_entities as number) || (config.max as number) || 10000,
+    confidence_threshold: (config.confidence_threshold as number) || (config.threshold as number) || 0.3,
+    relation_types: (config.relation_types as string[]) || (config.relations as string[]) || [],
+    auto_contradiction_check: (config.auto_contradiction_check as boolean) ?? (config.contradiction as boolean) ?? true,
+    merge_similar: (config.merge_similar as boolean) ?? (config.merge as boolean) ?? true,
+    similarity_threshold: (config.similarity_threshold as number) || (config.similarity as number) || 0.8,
+  };
+}
+
+/** 解析元认知配置 / Parse metacognition configuration */
+function parseMetacognitionConfig(config: Record<string, unknown>): MetacognitionDSLConfig {
+  return {
+    enabled: (config.enabled as boolean) ?? true,
+    track_thinking: (config.track_thinking as boolean) ?? (config.track as boolean) ?? true,
+    detect_biases: (config.detect_biases as boolean) ?? (config.biases as boolean) ?? true,
+    calibrate_confidence: (config.calibrate_confidence as boolean) ?? (config.calibrate as boolean) ?? true,
+    auto_reflect: (config.auto_reflect as boolean) ?? (config.reflect as boolean) ?? true,
+    reflect_interval: (config.reflect_interval as number) || (config.interval as number) || 5,
+    min_confidence: (config.min_confidence as number) || (config.min as number) || 0.7,
+    bias_severity_threshold: (config.bias_severity_threshold as number) || (config.severity as number) || 0.4,
+    max_thinking_steps: (config.max_thinking_steps as number) || (config.max_steps as number) || 50,
+    attention_monitoring: (config.attention_monitoring as boolean) ?? (config.attention as boolean) ?? true,
+    blocked_biases: (config.blocked_biases as string[]) || (config.blocked as string[]) || [],
   };
 }
 
@@ -1374,6 +1549,86 @@ export function serializeDSL(config: AgentDSLConfig): string {
     lines.push(`        ttl = ${m.ttl_seconds}`);
     lines.push(`        search = "${m.search_method}"`);
     lines.push(`        priority = ${m.priority}`);
+    lines.push(`    }`);
+  }
+
+  // 蜂群智能 / Swarm intelligence
+  if (config.swarm) {
+    const s = config.swarm;
+    lines.push("");
+    lines.push(`    swarm {`);
+    lines.push(`        enabled = ${s.enabled}`);
+    lines.push(`        population = ${s.population_size}`);
+    lines.push(`        iterations = ${s.max_iterations}`);
+    lines.push(`        threshold = ${s.convergence_threshold}`);
+    lines.push(`        exploration = ${s.exploration_ratio}`);
+    lines.push(`        pheromone_weight = ${s.pheromone_weight}`);
+    lines.push(`        social_weight = ${s.social_weight}`);
+    lines.push(`        cognitive_weight = ${s.cognitive_weight}`);
+    lines.push(`        inertia = ${s.inertia_weight}`);
+    lines.push(`        dimensions = ${s.dimensions}`);
+    lines.push(`        bounds = [${s.bounds[0]}, ${s.bounds[1]}]`);
+    lines.push(`        fitness = "${s.fitness_function}"`);
+    lines.push(`        dance = ${s.waggle_dance}`);
+    lines.push(`        evaporation = ${s.evaporation_rate}`);
+    lines.push(`    }`);
+  }
+
+  // 进化引擎 / Evolution engine
+  if (config.evolution) {
+    const e = config.evolution;
+    lines.push("");
+    lines.push(`    evolution {`);
+    lines.push(`        enabled = ${e.enabled}`);
+    lines.push(`        population = ${e.population_size}`);
+    lines.push(`        elite = ${e.elite_count}`);
+    lines.push(`        crossover = ${e.crossover_rate}`);
+    lines.push(`        mutation = ${e.mutation_rate}`);
+    lines.push(`        tournament = ${e.tournament_size}`);
+    lines.push(`        generations = ${e.max_generations}`);
+    lines.push(`        target = ${e.target_fitness}`);
+    lines.push(`        stagnation = ${e.stagnation_limit}`);
+    if (e.genes_to_evolve.length > 0) lines.push(`        genes = ${JSON.stringify(e.genes_to_evolve)}`);
+    lines.push(`        fitness = "${e.fitness_function}"`);
+    lines.push(`        auto_trigger = ${e.auto_trigger}`);
+    lines.push(`        interval = ${e.trigger_interval}`);
+    lines.push(`    }`);
+  }
+
+  // 知识图谱 / Knowledge graph
+  if (config.knowledge_graph) {
+    const kg = config.knowledge_graph;
+    lines.push("");
+    lines.push(`    knowledge_graph {`);
+    lines.push(`        enabled = ${kg.enabled}`);
+    lines.push(`        auto = ${kg.auto_extract}`);
+    lines.push(`        path = "${kg.persistence_path}"`);
+    lines.push(`        halflife = ${kg.forgetting_halflife_days}`);
+    lines.push(`        max = ${kg.max_entities}`);
+    lines.push(`        threshold = ${kg.confidence_threshold}`);
+    if (kg.relation_types.length > 0) lines.push(`        relations = ${JSON.stringify(kg.relation_types)}`);
+    lines.push(`        contradiction = ${kg.auto_contradiction_check}`);
+    lines.push(`        merge = ${kg.merge_similar}`);
+    lines.push(`        similarity = ${kg.similarity_threshold}`);
+    lines.push(`    }`);
+  }
+
+  // 元认知 / Metacognition
+  if (config.metacognition) {
+    const mc = config.metacognition;
+    lines.push("");
+    lines.push(`    metacognition {`);
+    lines.push(`        enabled = ${mc.enabled}`);
+    lines.push(`        track = ${mc.track_thinking}`);
+    lines.push(`        biases = ${mc.detect_biases}`);
+    lines.push(`        calibrate = ${mc.calibrate_confidence}`);
+    lines.push(`        reflect = ${mc.auto_reflect}`);
+    lines.push(`        interval = ${mc.reflect_interval}`);
+    lines.push(`        min = ${mc.min_confidence}`);
+    lines.push(`        severity = ${mc.bias_severity_threshold}`);
+    lines.push(`        max_steps = ${mc.max_thinking_steps}`);
+    lines.push(`        attention = ${mc.attention_monitoring}`);
+    if (mc.blocked_biases.length > 0) lines.push(`        blocked = ${JSON.stringify(mc.blocked_biases)}`);
     lines.push(`    }`);
   }
 

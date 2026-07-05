@@ -3,7 +3,7 @@
 // Agent Factory — generates runnable Agent code from DSL config
 // ═══════════════════════════════════════════════════════════════════════
 
-import type { AgentDSLConfig, PersonalityConfig, BehaviorConfig, ToolConfig, ExtensionConfig, EventHook, PipelineConfig, PipelineStep, StateMachineConfig, CommunicationConfig, MemoryConfig } from "@/lib/agent-dsl";
+import type { AgentDSLConfig, PersonalityConfig, BehaviorConfig, ToolConfig, ExtensionConfig, EventHook, PipelineConfig, PipelineStep, StateMachineConfig, CommunicationConfig, MemoryConfig, SwarmDSLConfig, EvolutionDSLConfig, KnowledgeGraphDSLConfig, MetacognitionDSLConfig } from "@/lib/agent-dsl";
 import type { Agent } from "@/data/agents";
 
 /** 工厂输出 / Factory output */
@@ -203,6 +203,106 @@ function generateFullCode(config: AgentDSLConfig): string {
     lines.push(`export const ${toCamelCase(config.name)}Memory = ${generateMemoryCode(config.memory)};`);
   }
 
+  // 蜂群智能 / Swarm intelligence
+  if (config.swarm) {
+    lines.push("");
+    lines.push(`// ── 蜂群智能配置 / Swarm Intelligence Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Swarm = ${generateSwarmCode(config.swarm)};`);
+    lines.push("");
+    lines.push(`// 蜂群共识运行器 / Swarm consensus runner`);
+    lines.push(`import { runSwarmConsensus, createSwarmMemory } from "@/lib/swarm";`);
+    lines.push(`export async function run${toPascalCase(config.name)}Swarm(`);
+    lines.push(`  agentNames: string[],`);
+    lines.push(`  fitnessFn: (pos: number[]) => number`);
+    lines.push(`) {`);
+    lines.push(`  const memory = createSwarmMemory(${config.swarm.dimensions});`);
+    lines.push(`  return runSwarmConsensus(`);
+    lines.push(`    {`);
+    lines.push(`      populationSize: ${config.swarm.population_size},`);
+    lines.push(`      maxIterations: ${config.swarm.max_iterations},`);
+    lines.push(`      convergenceThreshold: ${config.swarm.convergence_threshold},`);
+    lines.push(`      explorationRatio: ${config.swarm.exploration_ratio},`);
+    lines.push(`      pheromoneWeight: ${config.swarm.pheromone_weight},`);
+    lines.push(`      socialWeight: ${config.swarm.social_weight},`);
+    lines.push(`      cognitiveWeight: ${config.swarm.cognitive_weight},`);
+    lines.push(`      inertiaWeight: ${config.swarm.inertia_weight},`);
+    lines.push(`      dimensions: ${config.swarm.dimensions},`);
+    lines.push(`      bounds: [${config.swarm.bounds[0]}, ${config.swarm.bounds[1]}],`);
+    lines.push(`    },`);
+    lines.push(`    agentNames,`);
+    lines.push(`    fitnessFn,`);
+    lines.push(`  );`);
+    lines.push(`}`);
+  }
+
+  // 进化引擎 / Evolution engine
+  if (config.evolution) {
+    lines.push("");
+    lines.push(`// ── 进化引擎配置 / Evolution Engine Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Evolution = ${generateEvolutionCode(config.evolution)};`);
+    lines.push("");
+    lines.push(`// 进化运行器 / Evolution runner`);
+    lines.push(`import { runEvolution, initializePopulation } from "@/lib/evolution";`);
+    lines.push(`export async function evolve${toPascalCase(config.name)}Parameters(`);
+    lines.push(`  fitnessFn: (chromosome: import("@/lib/evolution").Chromosome) => Promise<number>`);
+    lines.push(`) {`);
+    lines.push(`  return runEvolution(`);
+    lines.push(`    {`);
+    lines.push(`      populationSize: ${config.evolution.population_size},`);
+    lines.push(`      eliteCount: ${config.evolution.elite_count},`);
+    lines.push(`      crossoverRate: ${config.evolution.crossover_rate},`);
+    lines.push(`      mutationRate: ${config.evolution.mutation_rate},`);
+    lines.push(`      tournamentSize: ${config.evolution.tournament_size},`);
+    lines.push(`      maxGenerations: ${config.evolution.max_generations},`);
+    lines.push(`      targetFitness: ${config.evolution.target_fitness},`);
+    lines.push(`      stagnationLimit: ${config.evolution.stagnation_limit},`);
+    lines.push(`    },`);
+    lines.push(`    fitnessFn,`);
+    lines.push(`  );`);
+    lines.push(`}`);
+  }
+
+  // 知识图谱 / Knowledge graph
+  if (config.knowledge_graph) {
+    lines.push("");
+    lines.push(`// ── 知识图谱配置 / Knowledge Graph Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}KnowledgeGraph = ${generateKnowledgeGraphCode(config.knowledge_graph)};`);
+    lines.push("");
+    lines.push(`// 知识图谱查询器 / Knowledge graph query helpers`);
+    lines.push(`import { createKnowledgeGraph, addEntity, addRelation, queryGraph, findPath } from "@/lib/knowledge-graph";`);
+    lines.push(`export const ${toCamelCase(config.name)}Graph = createKnowledgeGraph();`);
+    lines.push(`export function query${toPascalCase(config.name)}Knowledge(startEntity: string, maxDepth = 3) {`);
+    lines.push(`  return queryGraph(${toCamelCase(config.name)}Graph, {`);
+    lines.push(`    startEntity,`);
+    lines.push(`    maxDepth,`);
+    lines.push(`    minConfidence: ${config.knowledge_graph.confidence_threshold},`);
+    lines.push(`    minWeight: 0.1,`);
+    lines.push(`    limit: 20,`);
+    lines.push(`  });`);
+    lines.push(`}`);
+  }
+
+  // 元认知 / Metacognition
+  if (config.metacognition) {
+    lines.push("");
+    lines.push(`// ── 元认知配置 / Metacognition Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Metacognition = ${generateMetacognitionCode(config.metacognition)};`);
+    lines.push("");
+    lines.push(`// 元认知管理器 / Metacognition manager`);
+    lines.push(`import { createMetacognitionManager, startThinking, recordThinking, endThinking } from "@/lib/metacognition";`);
+    lines.push(`export const ${toCamelCase(config.name)}Meta = createMetacognitionManager({`);
+    lines.push(`  enabled: ${config.metacognition.enabled},`);
+    lines.push(`  trackThinking: ${config.metacognition.track_thinking},`);
+    lines.push(`  detectBiases: ${config.metacognition.detect_biases},`);
+    lines.push(`  calibrateConfidence: ${config.metacognition.calibrate_confidence},`);
+    lines.push(`  autoReflect: ${config.metacognition.auto_reflect},`);
+    lines.push(`  reflectInterval: ${config.metacognition.reflect_interval},`);
+    lines.push(`  minConfidenceForAction: ${config.metacognition.min_confidence},`);
+    lines.push(`  biasSeverityThreshold: ${config.metacognition.bias_severity_threshold},`);
+    lines.push(`  maxThinkingChainLength: ${config.metacognition.max_thinking_steps},`);
+    lines.push(`});`);
+  }
+
   return lines.join("\n");
 }
 
@@ -237,12 +337,41 @@ function generateMemoryCode(mem: MemoryConfig): string {
   return JSON.stringify(mem, null, 2);
 }
 
+/** 生成蜂群配置代码 / Generate swarm config code */
+function generateSwarmCode(swarm: SwarmDSLConfig): string {
+  return JSON.stringify(swarm, null, 2);
+}
+
+/** 生成进化配置代码 / Generate evolution config code */
+function generateEvolutionCode(evol: EvolutionDSLConfig): string {
+  return JSON.stringify(evol, null, 2);
+}
+
+/** 生成知识图谱配置代码 / Generate knowledge graph config code */
+function generateKnowledgeGraphCode(kg: KnowledgeGraphDSLConfig): string {
+  return JSON.stringify(kg, null, 2);
+}
+
+/** 生成元认知配置代码 / Generate metacognition config code */
+function generateMetacognitionCode(meta: MetacognitionDSLConfig): string {
+  return JSON.stringify(meta, null, 2);
+}
+
 /** 转驼峰命名 / Convert to camelCase */
 function toCamelCase(name: string): string {
   return name
     .replace(/[^a-zA-Z0-9\s]/g, "")
     .split(/\s+/)
     .map((w, i) => i === 0 ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join("");
+}
+
+/** 转帕斯卡命名 / Convert to PascalCase */
+function toPascalCase(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9\s]/g, "")
+    .split(/\s+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join("");
 }
 
