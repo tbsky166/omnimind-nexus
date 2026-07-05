@@ -15,6 +15,10 @@ import {
   DOC_TOOLS,
   type ChatMessage,
 } from "@/lib/prompt";
+import { parseAgentDSL, serializeDSL } from "@/lib/agent-dsl";
+import { generateAgentPackage, generateAgentRegistry } from "@/lib/agent-factory";
+import { generateFullExtension } from "@/lib/nextjs-builder";
+import { findTemplate } from "@/data/agent-templates";
 import { executeGenerateDocument, executeFileWrite, executeFileRead } from "@/lib/document";
 import { agents } from "@/data/agents";
 
@@ -362,6 +366,77 @@ export async function POST(req: NextRequest) {
               };
               history.push(errMsg);
               await writeSSE(controller, encoder, errMsg);
+            }
+          }
+
+          // ═══ Agent 创建后处理：检测 DSL 代码并生成 Agent 代码包 / Agent creation post-processing: detect DSL code and generate agent package ═══
+          const creatorMsgs = history.filter((m) => (m.speaker === "Creator" || m.speaker === "🧬 Creator") && m.a2aLayer === "L4");
+          for (const creatorMsg of creatorMsgs) {
+            const dslMatch = creatorMsg.content.match(/```dsl\n([\s\S]*?)\n```/);
+            if (dslMatch) {
+              const dslSource = dslMatch[1];
+              const parsed = parseAgentDSL(dslSource);
+
+              if (parsed.success && parsed.config) {
+                // 生成 Agent 代码包 / Generate agent code package
+                const pkg = generateAgentPackage(parsed.config);
+                const ext = generateFullExtension(parsed.config);
+
+                // 生成 Agent 入口代码文件 / Generate agent entry code file
+                const agentCodeMsg: AgentMessage = {
+                  speaker: "Creator", emoji: "🧬",
+                  content: `已解析 DSL 并生成 Agent 代码包：\n\n• Agent 入口：可插入 agents.ts\n• 系统提示词：${parsed.config.name}Prompt\n• 工具定义：${parsed.config.name}Tools\n• API 路由：${ext.routes.length} 个\n• 组件：${ext.components.length} 个`,
+                  a2aLayer: "L1", isSystem: true,
+                };
+                history.push(agentCodeMsg);
+                await writeSSE(controller, encoder, agentCodeMsg);
+
+                // 为每个生成的文件创建下载链接 / Create download links for each generated file
+                const allFiles: { name: string; content: string; format: string }[] = [
+                  { name: `${parsed.config.name.replace(/\s+/g, "_")}_agent.ts`, content: pkg.fullCode, format: "ts" },
+                  { name: `${parsed.config.name.replace(/\s+/g, "_")}_dsl.adl`, content: serializeDSL(parsed.config), format: "adl" },
+                ];
+
+                for (const route of ext.routes) {
+                  allFiles.push({
+                    name: route.fileName,
+                    content: route.code,
+                    format: "ts",
+                  });
+                }
+
+                for (const comp of ext.components) {
+                  allFiles.push({
+                    name: comp.fileName,
+                    content: comp.code,
+                    format: "tsx",
+                  });
+                }
+
+                for (const file of allFiles) {
+                  const fileMsg: AgentMessage = {
+                    speaker: "Creator", emoji: "📦",
+                    content: file.content,
+                    fileUrl: `data:text/plain;base64,${Buffer.from(file.content).toString("base64")}`,
+                    downloadName: file.name,
+                    fileFormat: file.format,
+                    toolName: "agent_create",
+                    toolAction: `生成 ${file.name}`,
+                    a2aLayer: "L1",
+                  };
+                  history.push(fileMsg);
+                  await writeSSE(controller, encoder, fileMsg);
+                }
+              } else {
+                // DSL 解析失败 / DSL parse failed
+                const errMsg: AgentMessage = {
+                  speaker: "Creator", emoji: "⚠️",
+                  content: `DSL 解析警告：${parsed.errors.join("；")}。请检查语法。`,
+                  a2aLayer: "L1", isSystem: true,
+                };
+                history.push(errMsg);
+                await writeSSE(controller, encoder, errMsg);
+              }
             }
           }
 
