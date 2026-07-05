@@ -90,6 +90,40 @@ export const DOC_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "codebase_read",
+      description: "读取项目代码库中的任意源文件。可以查看系统的完整代码实现——包括 agent 定义、组件、API 路由、工具库、DSL 解析器等。用于理解系统架构、依赖关系、代码风格、或排查问题。禁止访问 .env、node_modules、.git 等敏感文件/目录。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "项目内的相对文件路径，如 src/lib/swarm.ts、src/app/page.tsx、src/data/agents.ts、package.json 等",
+          },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "codebase_list",
+      description: "列出项目目录结构，查看有哪些文件和子目录。用于初次探索代码库，了解项目组织方式。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "项目内的相对目录路径，如 src/lib/、src/app/、src/components/ 等，留空表示根目录",
+          },
+        },
+        required: ["path"],
+      },
+    },
+  },
 ];
 
 // ---- Agent Prompt Builder ----
@@ -144,6 +178,15 @@ ${agent.description}
 3. 如果其他 Agent 已经给出了好方案，在其基础上深化而非重复
 4. 你的回复必须是完整的可交付成果，用户拿到就能用
 5. 你是最终交付负责人时，完成分析后应调用 generate_document 工具生成正式文档
+6. 调用 codebase_read 工具可以读取项目的完整源代码——包括 agent 定义、系统组件、API 路由、工具库、DSL 解析器、蜂群/进化/知识图谱/元认知引擎等所有模块
+7. 调用 codebase_list 工具可以浏览项目目录结构，了解项目整体组织方式
+
+## 可用工具
+- **codebase_read**：读取项目代码库中的任意源文件（.ts、.tsx、.json 等），禁止访问 .env、node_modules、.git
+- **codebase_list**：列出项目目录结构，查看文件组织
+- **file_read**：读取 Agent 工作区文件（/workspace/）
+- **file_write**：在 Agent 工作区创建/编辑文件
+- **generate_document**：生成可下载的正式文档（docx/xlsx）
 
 ## 输出格式
 直接用自然语言回复，100-400字，必须包含具体可交付成果。不要输出 JSON，不要用代码块包裹回复。`;

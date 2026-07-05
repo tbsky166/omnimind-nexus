@@ -19,7 +19,7 @@ import { parseAgentDSL, serializeDSL } from "@/lib/agent-dsl";
 import { generateAgentPackage, generateAgentRegistry } from "@/lib/agent-factory";
 import { generateFullExtension } from "@/lib/nextjs-builder";
 import { findTemplate } from "@/data/agent-templates";
-import { executeGenerateDocument, executeFileWrite, executeFileRead } from "@/lib/document";
+import { executeGenerateDocument, executeFileWrite, executeFileRead, executeCodebaseRead, executeCodebaseList } from "@/lib/document";
 import { agents } from "@/data/agents";
 import { createKnowledgeGraph, addEntity, addRelation, queryGraph, applyForgettingCurve, generateGraphSummary, type KnowledgeGraph } from "@/lib/knowledge-graph";
 import { createMetacognitionManager, startThinking, recordThinking, endThinking, formatReflectionReport, type MetacognitionState } from "@/lib/metacognition";
@@ -172,6 +172,29 @@ async function toolExecutor(name: string, args: Record<string, unknown>): Promis
       success: result.success,
       tool: "file_read",
       content: result.content,
+      message: result.message,
+    });
+  }
+
+  if (name === "codebase_read") {
+    const result = await executeCodebaseRead((args.path as string) || "", process.cwd());
+    return JSON.stringify({
+      success: result.success,
+      tool: "codebase_read",
+      filePath: result.filePath,
+      content: result.content,
+      size: result.size,
+      message: result.message,
+    });
+  }
+
+  if (name === "codebase_list") {
+    const result = executeCodebaseList((args.path as string) || "", process.cwd());
+    return JSON.stringify({
+      success: result.success,
+      tool: "codebase_list",
+      dirPath: result.dirPath,
+      entries: result.entries,
       message: result.message,
     });
   }

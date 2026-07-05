@@ -113,6 +113,206 @@ export function listWorkspaceFiles(): string[] {
   }
 }
 
+// ---- 代码库文件操作 / Codebase file operations ----
+// 允许 Agent 读取整个项目代码库的文件（排除敏感文件/目录） / Allow agents to read any file in the project codebase (excluding sensitive files/dirs)
+
+// 禁止访问的目录和文件 / Forbidden directories and files
+const CODEBASE_BLACKLIST = [
+  /^node_modules\//,
+  /^\.git\//,
+  /^\.next\//,
+  /^\.env/,
+  /^\.env\./,
+  /\.env\.local$/,
+  /\.env\.production$/,
+  /\.env\.development$/,
+  /^\.DS_Store$/,
+  /^\.gitignore$/,
+  /^package-lock\.json$/,
+  /^yarn\.lock$/,
+  /^pnpm-lock\.yaml$/,
+  /^bun\.lockb$/,
+  /^public\/temp\//,
+  /^public\/workspace\//,
+  /\.log$/,
+  /^coverage\//,
+  /^\.vscode\//,
+  /^\.idea\//,
+  /^\.turbo\//,
+  /\.map$/,
+  /\.tsbuildinfo$/,
+];
+
+function isPathBlacklisted(relativePath: string): boolean {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return CODEBASE_BLACKLIST.some((pattern) => pattern.test(normalized));
+}
+
+/** 代码库文件读取 — 读取项目中的任意源文件（排除敏感文件） / Codebase file read — read any source file in the project (excluding sensitive files) */
+export async function executeCodebaseRead(
+  filePath: string,
+  cwd: string,
+): Promise<{ success: boolean; content: string; filePath: string; size: number; message: string }> {
+  // 清理路径，防止路径穿越 / Clean path to prevent path traversal
+  const safePath = filePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+
+  if (isPathBlacklisted(safePath)) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: 0,
+      message: `拒绝访问：${safePath} 属于受保护文件/目录，不允许读取。`,
+    };
+  }
+
+  const fullPath = path.join(cwd, safePath);
+
+  // 确保路径在项目目录内 / Ensure path is within project directory
+  if (!fullPath.startsWith(cwd)) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: 0,
+      message: `拒绝访问：路径越界，只允许读取项目目录内的文件。`,
+    };
+  }
+
+  if (!fs.existsSync(fullPath)) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: 0,
+      message: `文件不存在：${safePath}`,
+    };
+  }
+
+  const stat = fs.statSync(fullPath);
+  if (stat.isDirectory()) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: 0,
+      message: `${safePath} 是一个目录，请使用 codebase_list 查看目录内容。`,
+    };
+  }
+
+  // 限制单文件大小 500KB / Limit single file size to 500KB
+  const MAX_SIZE = 500 * 1024;
+  if (stat.size > MAX_SIZE) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: stat.size,
+      message: `文件过大：${safePath}（${(stat.size / 1024).toFixed(1)} KB），超过 ${(MAX_SIZE / 1024).toFixed(0)} KB 限制。`,
+    };
+  }
+
+  try {
+    const content = fs.readFileSync(fullPath, "utf-8");
+    return {
+      success: true,
+      content,
+      filePath: safePath,
+      size: stat.size,
+      message: `读取成功：${safePath}（${(stat.size / 1024).toFixed(1)} KB，${content.length} 字符）`,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      content: "",
+      filePath: safePath,
+      size: 0,
+      message: `读取失败: ${e instanceof Error ? e.message : "Unknown"}`,
+    };
+  }
+}
+
+/** 代码库目录列表 — 列出项目中的文件和子目录 / Codebase directory listing — list files and subdirectories in the project */
+export function executeCodebaseList(
+  dirPath: string,
+  cwd: string,
+): { success: boolean; entries: string[]; dirPath: string; message: string } {
+  const safePath = dirPath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/").replace(/\/$/, "");
+
+  if (safePath && isPathBlacklisted(safePath)) {
+    return {
+      success: false,
+      entries: [],
+      dirPath: safePath,
+      message: `拒绝访问：${safePath} 属于受保护目录，不允许列出。`,
+    };
+  }
+
+  const fullPath = safePath ? path.join(cwd, safePath) : cwd;
+
+  if (!fullPath.startsWith(cwd)) {
+    return {
+      success: false,
+      entries: [],
+      dirPath: safePath,
+      message: "拒绝访问：路径越界。",
+    };
+  }
+
+  if (!fs.existsSync(fullPath)) {
+    return {
+      success: false,
+      entries: [],
+      dirPath: safePath,
+      message: `目录不存在：${safePath || "/"}`,
+    };
+  }
+
+  const stat = fs.statSync(fullPath);
+  if (!stat.isDirectory()) {
+    return {
+      success: false,
+      entries: [],
+      dirPath: safePath,
+      message: `${safePath} 不是目录，请使用 codebase_read 读取文件内容。`,
+    };
+  }
+
+  try {
+    const allEntries = fs.readdirSync(fullPath, { withFileTypes: true });
+    const filtered = allEntries
+      .filter((entry) => {
+        const entryPath = safePath ? `${safePath}/${entry.name}` : entry.name;
+        return !isPathBlacklisted(entryPath) && !entry.name.startsWith(".");
+      })
+      .map((entry) => {
+        const suffix = entry.isDirectory() ? "/" : "";
+        return `${entry.name}${suffix}`;
+      })
+      .sort((a, b) => {
+        const aIsDir = a.endsWith("/");
+        const bIsDir = b.endsWith("/");
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
+        return a.localeCompare(b);
+      });
+
+    return {
+      success: true,
+      entries: filtered,
+      dirPath: safePath || "/",
+      message: `${safePath || "项目根目录"}：${filtered.length} 个条目`,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      entries: [],
+      dirPath: safePath,
+      message: `列出失败: ${e instanceof Error ? e.message : "Unknown"}`,
+    };
+  }
+}
+
 // ---- DOCX 生成器 / DOCX Generator ----
 // 将 Markdown 风格的内容转换为 DOCX 格式的 Buffer，支持标题、代码块、粗体等 / Convert Markdown-style content to DOCX format Buffer, supporting headings, code blocks, bold text, etc.
 export async function generateDocxBuffer(content: string, title: string): Promise<Buffer> {
