@@ -256,6 +256,219 @@ software_engineering, web_development, mobile_development, devops, cloud_computi
 ### 可用工具类型
 file_read, file_write, shell_exec, api_call, browser, database, generate_document
 
+### 内置函数（非预设，可在 DSL 中调用）
+### 验证类 / Validation
+- validate(data, rules) → 验证数据，返回 [isValid, errors]
+- assert(condition, message?) → 断言条件为真
+- type_check(value, expected_type) → 检查类型
+
+### 转换类 / Transform
+- transform(data, from, to) → 格式转换（json/yaml/xml/csv/markdown/text）
+- template(template_str, data) → 模板渲染，用 {{ }} 嵌入变量
+- extract(text, pattern) → 正则提取匹配内容
+- sanitize(data, mode) → 清理数据（html/sql/url/path/filename）
+
+### 控制流 / Control Flow
+- retry(action, max_attempts?, backoff?, delay_ms?) → 带重试执行
+- timeout(action, ms) → 超时控制
+- fallback(primary, backup) → 失败时执行备用
+- parallel(actions[]) → 并行执行多个操作
+- sequence(actions[]) → 顺序执行操作
+
+### IO 类 / IO
+- log(level, message) → 记录日志（debug/info/warn/error）
+- notify(target, message, priority?) → 发送通知
+- fetch(url, options?) → HTTP 请求
+- read_file(path, encoding?) → 读取文件
+- write_file(path, content) → 写入文件
+
+### 调度类 / Schedule
+- schedule(cron, action, timezone?) → 定时任务
+- delay(ms, action) → 延迟执行
+- debounce(action, wait_ms) → 防抖执行
+
+### 安全类 / Security
+- auth(method, config) → 认证检查（jwt/apikey/oauth/basic）
+- rate_limit(key, max_requests, period_seconds) → 速率限制
+- encrypt(data, algorithm?) → 加密（aes256/rsa/hmac）
+- hash(data, algorithm?) → 哈希（sha256/sha512/md5/bcrypt）
+
+### 缓存类 / Cache
+- cache_get(key) → 获取缓存
+- cache_set(key, value, ttl_seconds?) → 设置缓存
+- cache_delete(key) → 删除缓存
+
+### 事件钩子 / Event Hooks
+在 Agent 生命周期的特定时刻触发操作：
+\`\`\`
+events {
+    on "task_started" {
+        action = "log_and_notify"
+        condition = "task.priority == 'high'"
+        async = true
+        priority = 80
+    }
+    on "task_completed" {
+        action = "cache_result"
+        async = true
+        priority = 50
+    }
+    on "task_failed" {
+        action = "retry_or_escalate"
+        async = false
+        priority = 100
+    }
+}
+\`\`\`
+可用事件：task_started, task_completed, task_failed, agent_selected, agent_error, pipeline_start, pipeline_end, state_changed, message_received, timeout
+
+### 变量定义 / Variables
+\`\`\`
+variables {
+    max_retry_count = 5
+    default_timeout = 30000
+    organization = "OmniMind"
+    debug_mode = true
+}
+\`\`\`
+
+### 管道 / Pipelines
+定义多步骤工作流，支持依赖、重试、失败处理：
+\`\`\`
+pipeline "code_review_pipeline" {
+    description = "代码审查流水线"
+    trigger = "on_push"
+    max_concurrency = 2
+    timeout = 600
+    on_complete = "generate_report"
+
+    steps = [
+        {
+            name: "lint",
+            description: "代码风格检查",
+            agent: "审查 Agent",
+            tools: ["shell_exec"],
+            timeout: 60,
+            retry: 1,
+            on_failure: "skip",
+            depends_on: [],
+        },
+        {
+            name: "security_scan",
+            description: "安全漏洞扫描",
+            agent: "安全 Agent",
+            tools: ["file_read", "shell_exec"],
+            timeout: 300,
+            retry: 2,
+            on_failure: "abort",
+            depends_on: ["lint"],
+            condition: "file_count > 10",
+        },
+        {
+            name: "test",
+            description: "运行测试",
+            agent: "测试 Agent",
+            tools: ["shell_exec"],
+            timeout: 120,
+            retry: 1,
+            on_failure: "fallback",
+            fallback: "lint",
+            depends_on: ["lint"],
+        },
+    ]
+}
+\`\`\`
+
+### 状态机 / State Machine
+定义 Agent 的状态和转换规则：
+\`\`\`
+state_machine "task_lifecycle" {
+    initial = "idle"
+
+    states = [
+        {
+            name: "idle",
+            description: "等待任务",
+            initial: true,
+        },
+        {
+            name: "processing",
+            description: "处理任务中",
+            on_enter: "log_start",
+            on_exit: "save_checkpoint",
+            timeout: 300,
+        },
+        {
+            name: "completed",
+            description: "任务完成",
+            final: true,
+        },
+        {
+            name: "error",
+            description: "出错状态",
+            on_enter: "log_error",
+            timeout: 60,
+        },
+    ]
+
+    transitions = [
+        {
+            from: "idle",
+            to: "processing",
+            on: "task_received",
+            condition: "task.is_valid",
+            do: "init_task",
+        },
+        {
+            from: "processing",
+            to: "completed",
+            on: "task_done",
+            do: "finalize",
+        },
+        {
+            from: "processing",
+            to: "error",
+            on: "task_error",
+            do: "handle_error",
+        },
+        {
+            from: "error",
+            to: "idle",
+            on: "reset",
+            do: "cleanup",
+        },
+    ]
+}
+\`\`\`
+
+### 通信配置 / Communication
+\`\`\`
+communication {
+    protocol = "a2a"           # a2a | rest | websocket | grpc | message_queue
+    encoding = "json"           # json | protobuf | msgpack | text
+    timeout = 30000            # 通信超时（毫秒）
+    retry_policy = "exponential"  # none | fixed | exponential
+    max_retries = 3
+    heartbeat = 10000          # 心跳间隔（毫秒）
+    compression = "gzip"       # none | gzip | brotli
+    encryption = "tls"         # none | tls | custom
+    batch_size = 10
+    queue_capacity = 100
+}
+\`\`\`
+
+### 内存配置 / Memory
+\`\`\`
+memory {
+    type = "episodic"          # episodic | semantic | procedural | working
+    capacity = "100K"          # unlimited | 1K | 10K | 100K | 1M
+    persistence = true
+    ttl = 3600                 # 存活时间（秒）
+    search = "hybrid"          # exact | fuzzy | semantic | hybrid
+    priority = 50
+}
+\`\`\`
+
 ## 预设模板
 
 你可以直接使用以下预设模板（用户说"创建XX Agent"时优先匹配）：

@@ -3,7 +3,7 @@
 // Agent Factory — generates runnable Agent code from DSL config
 // ═══════════════════════════════════════════════════════════════════════
 
-import type { AgentDSLConfig, PersonalityConfig, BehaviorConfig, ToolConfig, ExtensionConfig } from "@/lib/agent-dsl";
+import type { AgentDSLConfig, PersonalityConfig, BehaviorConfig, ToolConfig, ExtensionConfig, EventHook, PipelineConfig, PipelineStep, StateMachineConfig, CommunicationConfig, MemoryConfig } from "@/lib/agent-dsl";
 import type { Agent } from "@/data/agents";
 
 /** 工厂输出 / Factory output */
@@ -161,7 +161,80 @@ function generateFullCode(config: AgentDSLConfig): string {
     `export const ${toCamelCase(config.name)}Triggers = ${JSON.stringify(config.triggers, null, 2)};`,
   ];
 
+  // 事件钩子 / Event hooks
+  if (config.events && config.events.length > 0) {
+    lines.push("");
+    lines.push(`// ── 事件钩子 / Event Hooks ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Events = ${generateEventsCode(config.events)};`);
+  }
+
+  // 变量 / Variables
+  if (config.variables && Object.keys(config.variables).length > 0) {
+    lines.push("");
+    lines.push(`// ── 变量定义 / Variable Definitions ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Variables = ${JSON.stringify(config.variables, null, 2)};`);
+  }
+
+  // 管道 / Pipelines
+  if (config.pipelines && config.pipelines.length > 0) {
+    lines.push("");
+    lines.push(`// ── 管道定义 / Pipeline Definitions ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Pipelines = ${generatePipelinesCode(config.pipelines)};`);
+  }
+
+  // 状态机 / State machine
+  if (config.state_machine) {
+    lines.push("");
+    lines.push(`// ── 状态机 / State Machine ──`);
+    lines.push(`export const ${toCamelCase(config.name)}StateMachine = ${generateStateMachineCode(config.state_machine)};`);
+  }
+
+  // 通信 / Communication
+  if (config.communication) {
+    lines.push("");
+    lines.push(`// ── 通信配置 / Communication Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Communication = ${generateCommunicationCode(config.communication)};`);
+  }
+
+  // 内存 / Memory
+  if (config.memory) {
+    lines.push("");
+    lines.push(`// ── 内存配置 / Memory Config ──`);
+    lines.push(`export const ${toCamelCase(config.name)}Memory = ${generateMemoryCode(config.memory)};`);
+  }
+
   return lines.join("\n");
+}
+
+/** 生成事件钩子代码 / Generate event hooks code */
+function generateEventsCode(events: EventHook[]): string {
+  const lines: string[] = [];
+  lines.push(`// Event hooks for the agent`);
+  lines.push(`// Triggered at specific lifecycle points`);
+  for (const ev of events) {
+    lines.push(`// ${ev.event}: ${ev.action}${ev.condition ? ` (if ${ev.condition})` : ""} [async=${ev.async}, priority=${ev.priority}]`);
+  }
+  return JSON.stringify(events, null, 2);
+}
+
+/** 生成管道代码 / Generate pipelines code */
+function generatePipelinesCode(pipelines: PipelineConfig[]): string {
+  return JSON.stringify(pipelines, null, 2);
+}
+
+/** 生成状态机代码 / Generate state machine code */
+function generateStateMachineCode(sm: StateMachineConfig): string {
+  return JSON.stringify(sm, null, 2);
+}
+
+/** 生成通信配置代码 / Generate communication config code */
+function generateCommunicationCode(comm: CommunicationConfig): string {
+  return JSON.stringify(comm, null, 2);
+}
+
+/** 生成内存配置代码 / Generate memory config code */
+function generateMemoryCode(mem: MemoryConfig): string {
+  return JSON.stringify(mem, null, 2);
 }
 
 /** 转驼峰命名 / Convert to camelCase */
