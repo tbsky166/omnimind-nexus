@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { agents } from "@/data/agents";
 import sprites, { type SpriteData } from "@/data/sprites";
+import EmojiSVG from "@/components/EmojiSVG";
 
 // ── 像素艺术 SVG / PixelArt SVG ──
 function PixelArtSVG({ rows, size, palette }: { rows: string[]; size: number; palette: Record<string, string> }) {
@@ -165,7 +166,7 @@ export default function AgentsPage() {
                     {/* 信息区 / Info */}
                     <div className="flex-1 min-w-0 px-4 py-3 flex flex-col justify-center">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-base">{agent.emoji}</span>
+                        <EmojiSVG emoji={agent.emoji} size={16} />
                         <span className="pixel-text text-[12px] text-ink font-medium tracking-[0.03em]">
                           {agent.name}
                         </span>

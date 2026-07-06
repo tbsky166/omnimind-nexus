@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ConversationMessage } from "@/data/agents";
 import sprites, { type SpriteData } from "@/data/sprites";
+import EmojiSVG from "@/components/EmojiSVG";
 
 // ── 主对话 UI 与流水线可视化 / Main conversation UI with pipeline visualization ──
 
@@ -212,7 +213,8 @@ function PipelineNode({
           imageRendering: "pixelated",
         }}
       >
-        <p className="pixel-text text-[8px] tracking-[0.1em] text-ink/80 font-semibold leading-tight">
+        <p className="pixel-text text-[8px] tracking-[0.1em] text-ink/80 font-semibold leading-tight flex items-center justify-center gap-1">
+          {node.emoji && <EmojiSVG emoji={node.emoji} size={12} />}
           {node.name}
         </p>
         <p className="pixel-text text-[7px] tracking-[0.15em] text-ink/35">{node.layer}</p>
@@ -594,7 +596,7 @@ function LiveChat() {
       {/* 会话头部栏 / Session header */}
       <div className="flex items-center gap-2 px-4 py-2 border-b-2 border-ink bg-[#fafafa]">
         <button onClick={() => setShowSessions(!showSessions)} className="pixel-text text-[10px] tracking-[0.1em] text-ink/50 hover:text-ink transition-colors">
-          {showSessions ? "✕ CLOSE" : "☰ HISTORY"}{sessions.length > 0 && <span className="text-ink/30 ml-0.5">({sessions.length})</span>}
+          {showSessions ? <><EmojiSVG emoji="✕" size={12} /> CLOSE</> : <><EmojiSVG emoji="☰" size={12} /> HISTORY</>}{sessions.length > 0 && <span className="text-ink/30 ml-0.5">({sessions.length})</span>}
         </button>
         <span className="text-ink/15">|</span>
         <button onClick={handleNewSession} className="pixel-text text-[10px] tracking-[0.1em] text-ink/50 hover:text-ink transition-colors">+ NEW</button>
@@ -611,12 +613,12 @@ function LiveChat() {
           ) : sessions.map((s) => (
             <div key={s.id} className={`flex items-center gap-3 px-4 py-2.5 border-b border-grid/50 last:border-0 hover:bg-[#fafafa] transition-colors cursor-pointer ${s.id === currentSessionId ? "bg-[#f5f5f5]" : ""}`}
               onClick={() => loadSession(s.id)}>
-              <span className="text-xs">💬</span>
+              <EmojiSVG emoji="💬" size={16} />
               <div className="flex-1 min-w-0">
                 <p className="pixel-text text-[11px] text-ink/70 truncate">{s.title}</p>
                 <p className="pixel-text text-[9px] text-ink/35 mt-0.5">{formatDate(s.updatedAt)} · {s.messageCount} msg</p>
               </div>
-              <button onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }} className="pixel-text text-[10px] text-ink/25 hover:text-red-500 transition-colors px-1">✕</button>
+              <button onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }} className="pixel-text text-[10px] text-ink/25 hover:text-red-500 transition-colors px-1"><EmojiSVG emoji="✕" size={10} /></button>
             </div>
           ))}
         </motion.div>
@@ -629,17 +631,17 @@ function LiveChat() {
       <div className="border-t-2 border-ink p-4 bg-[#fafafa]">
         {uploadedFile && (
           <div className="flex items-center gap-2 mb-2 px-2">
-            <span className="text-xs">📎</span>
+            <EmojiSVG emoji="📎" size={14} />
             <span className="pixel-text text-[10px] text-ink/60">{uploadedFile.name}</span>
             <span className="pixel-text text-[9px] text-ink/30 uppercase">{uploadedFile.type}</span>
-            <button onClick={() => { setUploadedFile(null); setMessages((prev) => [...prev, { speaker: "System", emoji: "📎", content: `已移除：${uploadedFile.name}`, isSystem: true }]); }} className="pixel-text text-[10px] text-ink/40 hover:text-ink ml-auto">✕</button>
+            <button onClick={() => { setUploadedFile(null); setMessages((prev) => [...prev, { speaker: "System", emoji: "📎", content: `已移除：${uploadedFile.name}`, isSystem: true }]); }} className="pixel-text text-[10px] text-ink/40 hover:text-ink ml-auto"><EmojiSVG emoji="✕" size={10} /></button>
           </div>
         )}
         <div className="flex gap-2">
           <input ref={fileInputRef} type="file" accept=".docx,.doc,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading || uploading}
             className="pixel-text text-[11px] bg-white border-2 border-ink px-3 py-2.5 hover:bg-ink hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ boxShadow: "2px 2px 0 #ccc" }}>{uploading ? "···" : "📎"}</button>
+            style={{ boxShadow: "2px 2px 0 #ccc" }}>{uploading ? "···" : <EmojiSVG emoji="📎" size={14} />}</button>
           <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
             placeholder={uploadedFile ? "分析这份文件..." : "输入任务，启动 Agent 流水线..."}
             className="flex-1 pixel-text text-xs bg-white border-2 border-ink px-4 py-2.5 outline-none focus:shadow-[2px_2px_0_#ccc] transition-shadow placeholder:text-ink/25" disabled={loading} />
