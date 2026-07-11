@@ -1,16 +1,6 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { SettingsProvider } from "@/lib/settings";
 
 export const metadata: Metadata = {
   title: "OmniMind Nexus — A2A Multi-Agent Platform",
@@ -25,8 +15,15 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-CN">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        {children}
+      <head>
+        {/* 鸿蒙字体 / HarmonyOS Sans */}
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/harmonyos-sans@1.0.1/HarmonyOS_Sans_SC/HarmonyOS_Sans_SC.css"
+        />
+      </head>
+      <body className="antialiased">
+        <SettingsProvider>{children}</SettingsProvider>
       </body>
     </html>
   );

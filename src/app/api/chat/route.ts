@@ -1,6 +1,8 @@
 // 主 A2A 聊天 API 路由 — 多 Agent 协作的核心入口，通过 SSE 流式返回各阶段输出
 // ═══ Beta 优化流水线：Router(分析+规划) → Credit → Round1(并行) → Round2(互评) → Arbitration(仲裁) → QG+L7(交付) ═══
 import { NextRequest } from "next/server";
+import * as fs from "fs";
+import * as path from "path";
 import {
   buildAgentPrompt,
   buildRouterPrompt,
@@ -24,6 +26,9 @@ import { agents } from "@/data/agents";
 import { createKnowledgeGraph, addEntity, addRelation, queryGraph, applyForgettingCurve, generateGraphSummary, type KnowledgeGraph } from "@/lib/knowledge-graph";
 import { createMetacognitionManager, startThinking, recordThinking, endThinking, formatReflectionReport, type MetacognitionState } from "@/lib/metacognition";
 import { runSwarmConsensus, createSwarmMemory, type SwarmConfig } from "@/lib/swarm";
+import { calculateDiversity, type DiversityMetrics } from "@/lib/diversity";
+import { analyzeCounterfactual, saveCounterfactualAnalysis } from "@/lib/counterfactual";
+import { addMemory } from "@/lib/dreams";
 
 // ── 全局共享状态：知识图谱跨会话持久化 / Global shared state: knowledge graph persists across sessions ──
 const globalKnowledgeGraph: KnowledgeGraph = createKnowledgeGraph();
@@ -93,6 +98,37 @@ function withTimeout(ms: number): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+}
+
+// 自定义 Agent 持久化：将 Creator 生成的 Agent 元数据追加到 custom-agents.json / Persist custom agent metadata to JSON file
+const CUSTOM_AGENTS_FILE = path.join(process.cwd(), "data", "custom-agents.json");
+
+function persistCustomAgent(agent: { name: string; emoji: string; role: string; category: string; personality: string; description: string; dslSource?: string }) {
+  const dir = path.dirname(CUSTOM_AGENTS_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(CUSTOM_AGENTS_FILE)) fs.writeFileSync(CUSTOM_AGENTS_FILE, "[]");
+
+  let list: Array<Record<string, unknown>> = [];
+  try {
+    list = JSON.parse(fs.readFileSync(CUSTOM_AGENTS_FILE, "utf-8"));
+    if (!Array.isArray(list)) list = [];
+  } catch { /* ignore */ }
+
+  // 同名去重：更新已有记录 / Dedup by name: update if exists
+  const existingIdx = list.findIndex((a) => a.name === agent.name);
+  const record = {
+    id: existingIdx >= 0 ? list[existingIdx].id : `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    ...agent,
+    createdAt: existingIdx >= 0 ? list[existingIdx].createdAt : Date.now(),
+  };
+
+  if (existingIdx >= 0) {
+    list[existingIdx] = record;
+  } else {
+    list.push(record);
+  }
+
+  fs.writeFileSync(CUSTOM_AGENTS_FILE, JSON.stringify(list, null, 2));
 }
 
 // 将前端传来的历史消息转换为 LLM 可用的 ChatMessage 数组 / Convert frontend history messages into ChatMessage array for LLM consumption
@@ -199,6 +235,25 @@ async function toolExecutor(name: string, args: Record<string, unknown>): Promis
     });
   }
 
+  if (name === "web_search") {
+    const { webSearch, formatSearchResults } = await import("@/lib/search");
+    const query = (args.query as string) || "";
+    if (!query.trim()) {
+      return JSON.stringify({ success: false, error: "搜索关键词不能为空" });
+    }
+    const result = await webSearch(query);
+    return JSON.stringify({
+      success: true,
+      tool: "web_search",
+      query: result.query,
+      answer: result.answer,
+      abstract: result.abstract,
+      results: result.results.slice(0, 5),
+      formatted: formatSearchResults(result),
+      searchTime: result.searchTime,
+    });
+  }
+
   return JSON.stringify({ error: `Unknown tool: ${name}` });
 }
 
@@ -267,7 +322,8 @@ async function runStreamingAgent(
   streamStart(controller, encoder, speaker, emoji, a2aLayer);
 
   let result;
-  const { signal, cleanup } = withTimeout(90000);
+  // 工具循环需要更多时间（每轮 API 调用 + 工具执行）/ Tool loop needs more time (per-round API call + tool execution)
+  const { signal, cleanup } = withTimeout(useTools ? 300000 : 120000);
   try {
     if (useTools) {
       result = await callLLMWithToolsStream(
@@ -282,6 +338,10 @@ async function runStreamingAgent(
         signal
       );
     }
+  } catch (e) {
+    // 出错时也要发送 streamEnd，否则前端会一直等待 / Must send streamEnd on error, otherwise frontend hangs
+    streamEnd(controller, encoder, speaker, emoji, a2aLayer);
+    throw e;
   } finally {
     cleanup();
   }
@@ -303,17 +363,23 @@ export async function POST(req: NextRequest) {
 
   try {
     // ---- 请求解析：提取消息、历史记录、文件上下文，并校验 API Key / Request parsing: extract message, history, file context, and validate API Key ----
-    const { message, history: prevHistory, fileContext } = await req.json();
+    const { message, history: prevHistory, fileContext, settings: clientSettings, _test } = await req.json();
     if (!message || typeof message !== "string") {
       return Response.json({ error: "message is required" }, { status: 400 });
     }
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    const baseUrl = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-    const model = process.env.OPENAI_MODEL || "gpt-4o";
+    // 优先使用前端传入的设置，回退到环境变量 / Prefer client settings, fallback to env
+    const apiKey = clientSettings?.apiKey || process.env.OPENAI_API_KEY;
+    const baseUrl = clientSettings?.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+    const model = clientSettings?.model || process.env.OPENAI_MODEL || "gpt-4o";
 
     if (!apiKey) {
-      return Response.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
+      return Response.json({ error: "API Key 未配置，请前往设置页面填写" }, { status: 500 });
+    }
+
+    // 测试连接模式 / Test connection mode
+    if (_test) {
+      return Response.json({ ok: true, model, baseUrl });
     }
 
     const prevMessages = buildPrevMessages(prevHistory);
@@ -449,7 +515,7 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
 
             const taskedPrompt = agentPrompt.replace(
               "## 协作规则",
-              `## 工具权限\n你可以调用以下工具：\n- file_write: 创建/编辑文件（代码、配置、笔记等）\n- file_read: 读取其他 Agent 写的文件\n- generate_document: 生成正式 docx/xlsx 文档\n如果任务需要产出文件，直接调用工具。调用工具后简要说一句即可。\n\n## 协作规则`
+              `## 工具权限\n你可以调用以下工具：\n- file_write: 创建/编辑文件（代码、配置、笔记等）\n- file_read: 读取其他 Agent 写的文件\n- generate_document: 生成正式 docx/xlsx 文档\n- web_search: 联网搜索最新信息（新闻、技术文档、实时数据等）\n\n**重要：调用工具后，必须用一句完整的话说明工具调用结果**（如"文档已生成"、"文件已创建"、"已搜索到相关结果"）。不要只调用工具不说话，必须给出文字回复。\n\n## 协作规则`
             );
 
             const msgs = buildMessages(prevMessages, fullContext, formatHistory(history));
@@ -461,6 +527,12 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
               );
 
               history.push({ speaker: agentName, emoji: agentEmoji, content, a2aLayer: "L4" });
+
+              // ── 人格进化事件 / Personality evolution event ──
+              // 完成后通知前端对 Agent 进行性格进化
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ type: "personality_evolve", agentName, feedbackType: "task_success", intensity: 0.7 })}\n\n`
+              ));
 
               for (const tr of toolResults) {
                 await sendToolCard(controller, encoder, agentName, agentEmoji, "L4", tr.name, tr.result);
@@ -530,10 +602,58 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
               };
               history.push(errMsg);
               await writeSSE(controller, encoder, errMsg);
+              // 失败时降低风险偏好，提升严谨度
+              controller.enqueue(encoder.encode(
+                `data: ${JSON.stringify({ type: "personality_evolve", agentName, feedbackType: "task_failure", intensity: 0.8 })}\n\n`
+              ));
             }
           }
 
-          // ═══ Agent 创建后处理：检测 DSL 代码并生成 Agent 代码包 / Agent creation post-processing: detect DSL code and generate agent package ═══
+          // ═══ 认知多样性评估 / Cognitive diversity assessment ═══
+          const l4Outputs = history
+            .filter((m) => m.a2aLayer === "L4" && !m.isSystem)
+            .map((m) => ({ agentName: m.speaker, content: m.content }));
+          if (l4Outputs.length >= 2) {
+            const diversity = calculateDiversity(l4Outputs);
+            const diversityMsg: AgentMessage = {
+              speaker: "🧠 多样性分析", emoji: "🧠",
+              content: `认知多样性指数：${diversity.overallScore}/100 | 群体思维风险：${diversity.groupthinkRisk === "high" ? "🔴 高" : diversity.groupthinkRisk === "medium" ? "🟡 中" : "🟢 低"} | 识别视角：${diversity.perspectiveCount} 个`,
+              a2aLayer: "L6", isSystem: true,
+            };
+            history.push(diversityMsg);
+            await writeSSE(controller, encoder, diversityMsg);
+            // 单独发送多样性数据供前端保存 / Send diversity data separately for frontend storage
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "diversity", ...diversity })}\n\n`));
+          }
+
+          // ═══ 反事实推理 / Counterfactual reasoning ═══
+          const actualAgentNames = selectedAgents.filter((a) => a !== "Creator" || true);
+          const diversityScore = l4Outputs.length >= 2
+            ? calculateDiversity(l4Outputs).overallScore
+            : 50;
+          const cfAnalysis = analyzeCounterfactual(
+            `session_${Date.now()}`,
+            message.slice(0, 100),
+            actualAgentNames,
+            { efficiency: 70, quality: 75, diversity: diversityScore },
+          );
+          saveCounterfactualAnalysis(cfAnalysis);
+          if (cfAnalysis.bestAlternative) {
+            const cfMsg: AgentMessage = {
+              speaker: "🔮 反事实分析", emoji: "🔮",
+              content: `💡 发现更优组合：用「${cfAnalysis.bestAlternative.agents.join("、")}」替代当前组合，预计综合得分提升 ${cfAnalysis.bestAlternative.estimatedScore - Math.round(70 * 0.3 + 75 * 0.4 + diversityScore * 0.3)} 分。${cfAnalysis.bestAlternative.reasoning}`,
+              a2aLayer: "L6", isSystem: true,
+            };
+            history.push(cfMsg);
+            await writeSSE(controller, encoder, cfMsg);
+          }
+
+          // ═══ 记忆巩固 / Memory consolidation ═══
+          for (const msg of l4Outputs) {
+            addMemory(msg.agentName, `session_${Date.now()}`, msg.content, "insight", 60);
+          }
+
+          // ═══ Agent 创建后处理 / Agent creation post-processing ═══
           const creatorMsgs = history.filter((m) => (m.speaker === "Creator" || m.speaker === "🧬 Creator") && m.a2aLayer === "L4");
           for (const creatorMsg of creatorMsgs) {
             const dslMatch = creatorMsg.content.match(/```dsl\n([\s\S]*?)\n```/);
@@ -542,6 +662,23 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
               const parsed = parseAgentDSL(dslSource);
 
               if (parsed.success && parsed.config) {
+                // 持久化自定义 Agent 到注册表 / Persist custom agent to registry
+                try {
+                  const p = parsed.config.personality;
+                  const personalityStr = `${p.type} · 细节${p.detail_level} · 风险${p.risk_tolerance} · 创造力${p.creativity}`;
+                  persistCustomAgent({
+                    name: parsed.config.name,
+                    emoji: parsed.config.emoji || "🤖",
+                    role: parsed.config.role,
+                    category: parsed.config.category || "Specialized",
+                    personality: personalityStr,
+                    description: parsed.config.description,
+                    dslSource: dslSource,
+                  });
+                } catch (e) {
+                  console.error("持久化自定义 Agent 失败:", e);
+                }
+
                 // 生成 Agent 代码包 / Generate agent code package
                 const pkg = generateAgentPackage(parsed.config);
                 const ext = generateFullExtension(parsed.config);
@@ -699,7 +836,7 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           } catch (e) {
             const qgMsg: AgentMessage = {
               speaker: "Quality Gate", emoji: "✅",
-              content: "协作完成。请查看各 Agent 的分析结果。",
+              content: `[Quality Gate 阶段出错] ${e instanceof Error ? e.message : "执行失败"}。请查看各 Agent 的分析结果。`,
               isSystem: true,
             };
             history.push(qgMsg);

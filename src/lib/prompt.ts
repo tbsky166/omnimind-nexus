@@ -34,6 +34,229 @@ export interface LLMResponse {
   toolResults: { name: string; result: string }[];
 }
 
+// ---- DSML 解析器 / DSML Parser ──
+// 某些模型（如 DeepSeek）在 content 中输出 DSML 格式的工具调用，而非标准 tool_calls 字段
+// Some models (e.g. DeepSeek) output tool calls in DSML format inside content, not in standard tool_calls field
+const DSML_MARKER = "｜｜DSML｜｜";
+
+// 检测内容中是否包含 DSML 工具调用 / Detect DSML tool calls in content
+export function hasDSMLToolCalls(content: string): boolean {
+  return content.includes(DSML_MARKER) && content.includes("invoke");
+}
+
+// 从 DSML 内容中提取工具调用 / Extract tool calls from DSML content
+export function parseDSMLToolCalls(content: string): { toolCalls: ToolCall[]; cleanContent: string } {
+  const toolCalls: ToolCall[] = [];
+
+  // 移除所有 DSML 块，提取工具调用 / Remove DSML blocks, extract tool calls
+  // 匹配 <｜｜DSML｜｜invoke name="xxx"> ... </｜｜DSML｜｜invoke>
+  const invokeRegex = /<｜｜DSML｜｜invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/｜｜DSML｜｜invoke>/g;
+  let match: RegExpExecArray | null;
+  let callIndex = 0;
+
+  while ((match = invokeRegex.exec(content)) !== null) {
+    const name = match[1];
+    const body = match[2];
+
+    // 提取参数 / Extract parameters
+    // 匹配 <｜｜DSML｜｜parameter name="xxx" string="true">value</｜｜DSML｜｜parameter>
+    const params: Record<string, unknown> = {};
+    const paramRegex = /<｜｜DSML｜｜parameter\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/｜｜DSML｜｜parameter>/g;
+    let paramMatch: RegExpExecArray | null;
+    while ((paramMatch = paramRegex.exec(body)) !== null) {
+      const paramName = paramMatch[1];
+      let paramValue = paramMatch[2].trim();
+      // 尝试 JSON 解析 / Try JSON parse
+      try { paramValue = JSON.parse(paramValue); } catch { /* 保持字符串 / Keep as string */ }
+      params[paramName] = paramValue;
+    }
+
+    toolCalls.push({
+      id: `dsml_call_${Date.now()}_${callIndex++}`,
+      type: "function",
+      function: {
+        name,
+        arguments: JSON.stringify(params),
+      },
+    });
+  }
+
+  // 清除所有 DSML 内容，保留纯文本 / Remove all DSML content, keep plain text
+  const cleanContent = content
+    // 移除整个 DSML 块 / Remove entire DSML blocks
+    .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, "")
+    .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*$/g, "")
+    .replace(/<｜｜DSML｜｜invoke[^>]*>[\s\S]*?<\/｜｜DSML｜｜invoke>/g, "")
+    .replace(/<｜｜DSML｜｜invoke[^>]*>[\s\S]*$/g, "")
+    .replace(/<｜｜DSML｜｜parameter[^>]*>[\s\S]*?<\/｜｜DSML｜｜parameter>/g, "")
+    .replace(/<｜｜DSML｜｜parameter[^>]*>[\s\S]*$/g, "")
+    // 清除散落的 DSML 标记 / Clean stray DSML markers
+    .replace(/<｜｜DSML｜｜[^>]*>/g, "")
+    .replace(/<\/｜｜DSML｜｜[^>]*>/g, "")
+    .trim();
+
+  return { toolCalls, cleanContent };
+}
+
+// 过滤流式 token 中的 DSML 标记 / Filter DSML markers from streaming tokens
+// DSML 标记可能跨 token 拆分，需要用 pending buffer 缓冲可能的开头
+// DSML markers can split across tokens; use pending buffer for partial markers
+// 只过滤 DSML 块内的内容，块外的正常文本仍然输出 / Only filter DSML block content, normal text outside is still output
+export function createDSMLStreamFilter() {
+  const DSML_OPEN = "<｜｜DSML｜｜";
+  const DSML_CLOSE = "</｜｜DSML｜｜";
+
+  let dsmlMode = false;
+  let buffer = "";
+
+  // 扫描 buffer，统计完整的开/闭标签，返回 DSML 块结束位置 / Scan buffer, count complete open/close tags, return DSML block end position
+  function findDSMLEnd(buf: string): number {
+    let openCount = 0;
+    let closeCount = 0;
+    let lastCloseEnd = -1;
+    let pos = 0;
+
+    while (pos < buf.length) {
+      const openIdx = buf.indexOf(DSML_OPEN, pos);
+      const closeIdx = buf.indexOf(DSML_CLOSE, pos);
+
+      if (openIdx === -1 && closeIdx === -1) break;
+
+      if (openIdx !== -1 && (closeIdx === -1 || openIdx < closeIdx)) {
+        // 找到开标签，查找 > 确认标签完整 / Found opening tag, look for > to confirm complete
+        const gtIdx = buf.indexOf(">", openIdx);
+        if (gtIdx !== -1) {
+          openCount++;
+          pos = gtIdx + 1;
+        } else {
+          break; // 开标签不完整，等待更多 token / Incomplete opening tag, wait
+        }
+      } else {
+        // 找到闭标签，查找 > 确认标签完整 / Found closing tag, look for > to confirm complete
+        const gtIdx = buf.indexOf(">", closeIdx);
+        if (gtIdx !== -1) {
+          closeCount++;
+          lastCloseEnd = gtIdx;
+          pos = gtIdx + 1;
+        } else {
+          break; // 闭标签不完整，等待更多 token / Incomplete closing tag, wait
+        }
+      }
+    }
+
+    // 闭标签数 >= 开标签数 → DSML 块完整 / closeCount >= openCount → DSML block complete
+    if (closeCount >= openCount && openCount > 0 && lastCloseEnd !== -1) {
+      return lastCloseEnd + 1; // 返回最后一个 > 之后的位置 / Return position after last >
+    }
+    return -1;
+  }
+
+  return {
+    process(token: string): string {
+      buffer += token;
+      let output = "";
+      let progress = true;
+
+      while (progress) {
+        progress = false;
+
+        if (!dsmlMode) {
+          // 正常模式：查找 DSML 开头 / Normal mode: look for DSML start
+          const idx = buffer.indexOf(DSML_OPEN);
+          if (idx !== -1) {
+            // 输出 DSML 之前的文本 / Output text before DSML
+            output += buffer.slice(0, idx);
+            buffer = buffer.slice(idx);
+            dsmlMode = true;
+            progress = true;
+          } else {
+            // 检查尾部是否是 DSML 开头的前缀 / Check if tail is prefix of DSML_OPEN
+            let maxPrefix = 0;
+            for (let i = Math.min(buffer.length, DSML_OPEN.length); i > 0; i--) {
+              if (DSML_OPEN.startsWith(buffer.slice(-i))) {
+                maxPrefix = i;
+                break;
+              }
+            }
+            // 输出安全部分，保留可能的前缀 / Output safe part, keep potential prefix
+            output += buffer.slice(0, buffer.length - maxPrefix);
+            buffer = buffer.slice(buffer.length - maxPrefix);
+          }
+        }
+
+        if (dsmlMode) {
+          // DSML 模式：检查块是否完整 / DSML mode: check if block is complete
+          const endPos = findDSMLEnd(buffer);
+          if (endPos !== -1) {
+            // DSML 块结束，保留块后的文本 / DSML block ended, keep text after block
+            buffer = buffer.slice(endPos);
+            dsmlMode = false;
+            progress = true; // 继续处理剩余 buffer / Continue processing remaining buffer
+          }
+          // 块不完整，等待更多 token / Block incomplete, wait for more tokens
+        }
+      }
+
+      return output;
+    },
+
+    // 流结束时，输出残留的非 DSML 内容 / At stream end, flush remaining non-DSML content
+    flush(): string {
+      if (dsmlMode) return ""; // DSML 模式下丢弃未完成的内容 / Discard incomplete DSML
+      const result = buffer;
+      buffer = "";
+      return result;
+    },
+  };
+}
+
+// 自动检测 content 中的代码块，将其转为 file_write 工具调用
+// Auto-detect code blocks in content, convert to file_write tool calls
+// 当模型不听话直接输出代码而非调用工具时，自动兜底 / Fallback when model outputs code directly instead of calling tools
+const LANG_EXT_MAP: Record<string, string> = {
+  python: "py", py: "py", javascript: "js", js: "js", typescript: "ts", ts: "ts",
+  jsx: "jsx", tsx: "tsx", bash: "sh", sh: "sh", shell: "sh", json: "json",
+  html: "html", css: "css", scss: "scss", java: "java", go: "go", rust: "rs",
+  cpp: "cpp", c: "c", csharp: "cs", cs: "cs", kotlin: "kt", swift: "swift",
+  sql: "sql", yaml: "yaml", yml: "yml", markdown: "md", md: "md", xml: "xml",
+  php: "php", ruby: "rb", rb: "rb", dart: "dart", vue: "vue", svelte: "svelte",
+};
+
+function extractCodeBlocksAsToolCalls(content: string): ToolCall[] {
+  const toolCalls: ToolCall[] = [];
+  // 匹配 ```lang\n...``` 格式的代码块 / Match ```lang\n...``` code blocks
+  const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+  let idx = 0;
+
+  while ((match = codeBlockRegex.exec(content)) !== null) {
+    const lang = (match[1] || "").toLowerCase();
+    const code = match[2];
+
+    // 只处理大段代码（超过 150 字符），避免误判短代码片段 / Only handle large code blocks (>150 chars)
+    if (!code || code.trim().length < 150) continue;
+
+    const ext = LANG_EXT_MAP[lang] || lang || "txt";
+    const fileName = `agent_output_${Date.now()}_${idx}.${ext}`;
+
+    toolCalls.push({
+      id: `auto_call_${Date.now()}_${idx}`,
+      type: "function" as const,
+      function: {
+        name: "file_write",
+        arguments: JSON.stringify({
+          path: fileName,
+          content: code,
+          action: "create",
+        }),
+      },
+    });
+    idx++;
+  }
+
+  return toolCalls;
+}
+
 // ---- Tool Definitions ----
 export const DOC_TOOLS: ToolDefinition[] = [
   {
@@ -124,6 +347,23 @@ export const DOC_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "联网搜索最新信息。当需要查询实时数据、最新新闻、技术文档、事实核查或任何超出 AI 知识范围的信息时使用。通过 DuckDuckGo 引擎获取搜索结果。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "搜索关键词，用中文或英文，尽量精确。例如 'React 19 新特性 2025'、'Python 3.13 release notes'",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
 ];
 
 // ---- Agent Prompt Builder ----
@@ -188,8 +428,16 @@ ${agent.description}
 - **file_write**：在 Agent 工作区创建/编辑文件
 - **generate_document**：生成可下载的正式文档（docx/xlsx）
 
+## 工具使用要求（重要）
+- **需要产出代码、配置、脚本时，必须调用 file_write 工具创建文件，禁止直接在回复中粘贴代码块**
+- **需要产出报告、方案、文档时，必须调用 generate_document 工具生成正式文档**
+- **需要查看代码库时，必须调用 codebase_read 工具读取实际源码，不要凭记忆编造代码内容**
+- **需要查询最新信息、实时数据、新闻、技术文档时，必须调用 web_search 工具联网搜索**
+- **调用工具后，必须用一句完整的话确认结果**（如"文档已生成，请查收"、"文件已创建"、"搜索完成，以下是相关结果"），不要只调用工具不回复文字
+- 回复正文只写分析、说明、步骤，所有代码/文档内容通过工具产出
+
 ## 输出格式
-直接用自然语言回复，100-400字，必须包含具体可交付成果。不要输出 JSON，不要用代码块包裹回复。`;
+直接用自然语言回复，100-400字。不要输出 JSON，不要在回复中粘贴代码块——代码必须通过 file_write 工具产出。`;
 }
 
 // ---- Creator 专用提示词（支持 DSL 代码生成）/ Creator dedicated prompt (with DSL code generation) ----
@@ -717,9 +965,20 @@ export async function callLLM(
   const choice = data.choices?.[0];
   const message = choice?.message;
 
+  // ── DSML 后处理：解析模型在 content 中输出的工具调用 ──
+  const rawContent = message?.content || "";
+  const standardToolCalls = message?.tool_calls || [];
+  let finalContent = rawContent;
+  let dsmlToolCalls: ToolCall[] = [];
+  if (hasDSMLToolCalls(rawContent)) {
+    const { toolCalls, cleanContent } = parseDSMLToolCalls(rawContent);
+    finalContent = cleanContent;
+    dsmlToolCalls = toolCalls;
+  }
+
   return {
-    content: message?.content || "",
-    toolCalls: message?.tool_calls || [],
+    content: finalContent,
+    toolCalls: [...standardToolCalls, ...dsmlToolCalls],
     executedToolCalls: [],
     toolResults: [],
   };
@@ -833,6 +1092,7 @@ export async function callLLMStream(
   let buffer = "";
   let content = "";
   const toolCallMap = new Map<number, { id: string; name: string; arguments: string }>();
+  const dsmlFilter = createDSMLStreamFilter();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -851,7 +1111,11 @@ export async function callLLMStream(
         if (!delta) continue;
         if (delta.content) {
           content += delta.content;
-          onToken?.(delta.content);
+          // 过滤 DSML 标记，只输出干净的部分 / Filter DSML, only output clean part
+          const cleanToken = dsmlFilter.process(delta.content);
+          if (cleanToken) {
+            onToken?.(cleanToken);
+          }
         }
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
@@ -871,6 +1135,12 @@ export async function callLLMStream(
     }
   }
 
+  // 流结束，输出残留的安全内容 / Stream ended, flush remaining safe content
+  const flushed = dsmlFilter.flush();
+  if (flushed) {
+    onToken?.(flushed);
+  }
+
   const toolCalls: ToolCall[] = [];
   for (const [, entry] of toolCallMap) {
     if (entry.name) {
@@ -882,7 +1152,21 @@ export async function callLLMStream(
     }
   }
 
-  return { content, toolCalls, executedToolCalls: [], toolResults: [] };
+  // ── DSML 后处理：解析模型在 content 中输出的工具调用 ──
+  // DSML post-processing: parse tool calls from content (some models use DSML format)
+  let finalContent = content;
+  let extraToolCalls: ToolCall[] = [];
+  if (hasDSMLToolCalls(content)) {
+    const { toolCalls: dsmlCalls, cleanContent } = parseDSMLToolCalls(content);
+    finalContent = cleanContent;
+    extraToolCalls = dsmlCalls;
+  }
+
+  // 合并标准 tool_calls 和 DSML 解析出的 tool_calls
+  // Merge standard tool_calls and DSML-parsed tool_calls
+  const allToolCalls = [...toolCalls, ...extraToolCalls];
+
+  return { content: finalContent, toolCalls: allToolCalls, executedToolCalls: [], toolResults: [] };
 }
 
 // ---- Streaming LLM Call with Tool Loop ----
@@ -902,41 +1186,147 @@ export async function callLLMWithToolsStream(
   let maxRounds = 2;
   const allToolCalls: ToolCall[] = [];
   const allToolResults: { name: string; result: string }[] = [];
+  let lastContent = ""; // 保存最后一次成功的内容 / Save last successful content
+
+  // 每轮调用创建独立的超时信号，避免第一轮用完后第二轮立即超时
+  // Create independent timeout signal per round, prevent round 2 from timing out immediately
+  function createRoundSignal(): AbortSignal {
+    // 如果外部 signal 已经 aborted，直接用 / If outer signal already aborted, use it
+    if (signal?.aborted) return signal;
+    const roundController = new AbortController();
+    const timer = setTimeout(() => roundController.abort(), 120000); // 每轮 120 秒 / 120s per round
+    // 如果外部 signal abort，也 abort 内部 / If outer signal aborts, abort inner too
+    if (signal) {
+      signal.addEventListener("abort", () => roundController.abort(), { once: true });
+    }
+    // 清理 timer 的方法：在 promise settle 后 clearTimeout / Clean up timer: clear after promise settles
+    const origSignal = roundController.signal;
+    (origSignal as unknown as { _cleanup: () => void })._cleanup = () => clearTimeout(timer);
+    return origSignal;
+  }
+
+  function cleanupSignal(sig: AbortSignal) {
+    const cleaner = (sig as unknown as { _cleanup?: () => void })._cleanup;
+    if (cleaner) cleaner();
+  }
 
   while (maxRounds-- > 0) {
-    const result = await callLLMStream(systemPrompt, currentMessages, apiKey, baseUrl, model, maxTokens, tools, onToken, signal);
+    const roundSignal = createRoundSignal();
+    let result: LLMResponse;
+    try {
+      result = await callLLMStream(systemPrompt, currentMessages, apiKey, baseUrl, model, maxTokens, tools, onToken, roundSignal);
+    } catch (e) {
+      cleanupSignal(roundSignal);
+      // 后续轮次调用失败时，不 throw，返回已有结果 / Don't throw on subsequent round failure, return what we have
+      if (allToolCalls.length > 0) {
+        return { content: lastContent, toolCalls: allToolCalls, executedToolCalls: allToolCalls, toolResults: allToolResults };
+      }
+      throw e;
+    }
+    cleanupSignal(roundSignal);
 
+    lastContent = result.content;
+
+    // 自动检测：模型没有调用工具但直接输出了大段代码块 / Auto-detect: model output code blocks instead of calling tools
     if (result.toolCalls.length === 0) {
-      return { ...result, executedToolCalls: allToolCalls, toolResults: allToolResults };
+      const autoCalls = extractCodeBlocksAsToolCalls(result.content);
+      if (autoCalls.length > 0) {
+        result = { ...result, toolCalls: autoCalls };
+      } else {
+        // 已执行过工具调用但模型未产出文本 → 补充兜底回复，避免流式输出中断 / Tool calls executed but model produced no text → add fallback to prevent stream cutoff
+        if (allToolCalls.length > 0 && !result.content.trim()) {
+          const fallback = "已完成工具调用，请查看产出文件。";
+          onToken?.(fallback);
+          return { ...result, content: fallback, executedToolCalls: allToolCalls, toolResults: allToolResults };
+        }
+        return { ...result, executedToolCalls: allToolCalls, toolResults: allToolResults };
+      }
     }
 
     allToolCalls.push(...result.toolCalls);
-    currentMessages.push({
-      role: "assistant",
-      content: result.content || "",
-      tool_calls: result.toolCalls,
-    });
 
-    for (const tc of result.toolCalls) {
-      let toolResult: string;
-      try {
-        const args = JSON.parse(tc.function.arguments);
-        toolResult = await executeTool(tc.function.name, args);
-        allToolResults.push({ name: tc.function.name, result: toolResult });
-      } catch (e) {
-        toolResult = `Error: ${e instanceof Error ? e.message : "Unknown error"}`;
-      }
+    // 检测是否为 DSML 工具调用（合成 ID）/ Detect DSML tool calls (synthetic IDs)
+    // DSML 模型（如 DeepSeek）不认 tool_calls/tool 消息格式，需要用 user 消息传递结果
+    // DSML models (e.g. DeepSeek) don't understand tool_calls/tool message format, use user messages instead
+    const isDSML = result.toolCalls.every(tc => tc.id.startsWith("dsml_call_") || tc.id.startsWith("auto_call_"));
+
+    if (isDSML) {
+      // DSML 模式：用普通 user 消息传递工具结果 / DSML mode: use regular user messages for tool results
       currentMessages.push({
-        role: "tool",
-        content: toolResult,
-        tool_call_id: tc.id,
+        role: "assistant",
+        content: result.content || "（正在调用工具...）",
       });
+
+      // 执行所有工具，收集结果 / Execute all tools, collect results
+      const toolResultsText: string[] = [];
+      for (const tc of result.toolCalls) {
+        let toolResult: string;
+        try {
+          const args = JSON.parse(tc.function.arguments);
+          toolResult = await executeTool(tc.function.name, args);
+          allToolResults.push({ name: tc.function.name, result: toolResult });
+        } catch (e) {
+          toolResult = `Error: ${e instanceof Error ? e.message : "Unknown error"}`;
+        }
+        // 截断过长的结果 / Truncate overly long results
+        const truncated = toolResult.length > 4000 ? toolResult.slice(0, 4000) + "\n...(内容过长已截断)" : toolResult;
+        toolResultsText.push(`【工具: ${tc.function.name}】参数: ${tc.function.arguments}\n结果:\n${truncated}`);
+      }
+
+      currentMessages.push({
+        role: "user",
+        content: `工具执行结果：\n\n${toolResultsText.join("\n\n")}\n\n请基于以上工具返回的结果继续回复。`,
+      });
+    } else {
+      // 标准模式：使用 tool_calls/tool 消息格式 / Standard mode: use tool_calls/tool message format
+      currentMessages.push({
+        role: "assistant",
+        content: result.content || "",
+        tool_calls: result.toolCalls,
+      });
+
+      for (const tc of result.toolCalls) {
+        let toolResult: string;
+        try {
+          const args = JSON.parse(tc.function.arguments);
+          toolResult = await executeTool(tc.function.name, args);
+          allToolResults.push({ name: tc.function.name, result: toolResult });
+        } catch (e) {
+          toolResult = `Error: ${e instanceof Error ? e.message : "Unknown error"}`;
+        }
+        // 截断过长的工具结果，防止 token 超限 / Truncate to prevent token overflow
+        if (toolResult.length > 4000) {
+          toolResult = toolResult.slice(0, 4000) + "\n...(内容过长已截断)";
+        }
+        currentMessages.push({
+          role: "tool",
+          content: toolResult,
+          tool_call_id: tc.id,
+        });
+      }
     }
   }
 
   // Final call without tools, still stream
-  const finalResult = await callLLMStream(systemPrompt, currentMessages, apiKey, baseUrl, model, maxTokens, undefined, onToken, signal);
-  return { ...finalResult, executedToolCalls: allToolCalls, toolResults: allToolResults };
+  const finalSignal = createRoundSignal();
+  try {
+    const finalResult = await callLLMStream(systemPrompt, currentMessages, apiKey, baseUrl, model, maxTokens, undefined, onToken, finalSignal);
+    cleanupSignal(finalSignal);
+    // 最终调用后仍无文本产出 → 补充兜底回复 / Still no text after final call → add fallback
+    if (!finalResult.content.trim() && allToolCalls.length > 0) {
+      const fallback = "已完成工具调用，请查看产出文件。";
+      onToken?.(fallback);
+      return { ...finalResult, content: fallback, executedToolCalls: allToolCalls, toolResults: allToolResults };
+    }
+    return { ...finalResult, executedToolCalls: allToolCalls, toolResults: allToolResults };
+  } catch (e) {
+    cleanupSignal(finalSignal);
+    // 最终调用失败时，返回已收集的结果 / Final call failed, return collected results
+    if (allToolCalls.length > 0) {
+      return { content: lastContent, toolCalls: allToolCalls, executedToolCalls: allToolCalls, toolResults: allToolResults };
+    }
+    throw e;
+  }
 }
 
 // ---- L7 Federation + QG Prompt (合并质量门禁与联邦交付) / L7 Federation + QG Prompt (merged quality gate and federation delivery) ----
