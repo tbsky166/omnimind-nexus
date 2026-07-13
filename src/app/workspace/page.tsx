@@ -36,7 +36,9 @@ export default function WorkspacePage() {
   const files = tab === "workspace" ? workspace : temp;
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      <div className="pixel-grid-bg" />
+      
       {/* 顶部导航 */}
       <nav className="nav-bar">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -57,27 +59,27 @@ export default function WorkspacePage() {
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setTab("workspace")}
-            className={`font-mono text-[10px] tracking-[0.1em] uppercase px-4 py-2 rounded-lg border-2 transition-all ${
+            className={`font-mono text-[10px] tracking-[0.1em] uppercase px-4 py-2 border-2 transition-all ${
               tab === "workspace"
-                ? "bg-ink text-white border-ink shadow-sm"
-                : "bg-white text-ink/50 border-grid hover:border-ink/40 hover:text-ink"
+                ? "bg-ink text-white border-ink"
+                : "bg-white text-ink/50 border-[#e5e5e5] hover:border-ink/40 hover:text-ink"
             }`}
           >
             工作区 ({workspace.length})
           </button>
           <button
             onClick={() => setTab("temp")}
-            className={`font-mono text-[10px] tracking-[0.1em] uppercase px-4 py-2 rounded-lg border-2 transition-all ${
+            className={`font-mono text-[10px] tracking-[0.1em] uppercase px-4 py-2 border-2 transition-all ${
               tab === "temp"
-                ? "bg-ink text-white border-ink shadow-sm"
-                : "bg-white text-ink/50 border-grid hover:border-ink/40 hover:text-ink"
+                ? "bg-ink text-white border-ink"
+                : "bg-white text-ink/50 border-[#e5e5e5] hover:border-ink/40 hover:text-ink"
             }`}
           >
             临时 ({temp.length})
           </button>
           <button
             onClick={fetchFiles}
-            className="font-mono text-[10px] text-ink/40 hover:text-ink ml-auto px-3 py-2 rounded-lg border border-grid hover:border-ink/30 transition-all hover:bg-white"
+            className="font-mono text-[10px] text-ink/40 hover:text-ink ml-auto px-3 py-2 border-2 border-[#e5e5e5] hover:border-ink/30 transition-all hover:bg-white"
           >
             ↻ 刷新
           </button>
@@ -88,7 +90,7 @@ export default function WorkspacePage() {
           <div className="pixel-text text-sm text-ink/30 text-center py-16">加载中...</div>
         ) : files.length === 0 ? (
           <div className="empty-state">
-            <EmojiSVG emoji="📦" size={40} />
+            <span className="empty-icon">✦</span>
             <p className="empty-title">暂无文件</p>
             <p className="empty-desc">Agent 在协作中生成的文件会出现在这里</p>
           </div>
@@ -100,7 +102,7 @@ export default function WorkspacePage() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.03 }}
-                className="card-pixel flex items-center gap-3 p-4"
+                className="pixel-area pixel-area-hover flex items-center gap-3 p-4"
               >
                 <EmojiSVG
                   emoji={file.name.endsWith(".docx") ? "📄" : file.name.endsWith(".xlsx") ? "📊" : "📄"}

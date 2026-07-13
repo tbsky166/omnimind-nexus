@@ -88,19 +88,18 @@ function PixelSprite({ name, size = 24, active = false }: { name: string; size?:
   const palette = getAgentPalette(name, sprite.palette);
   return (
     <div
-      className="relative flex items-center justify-center rounded-md flex-shrink-0"
+      className="relative flex items-center justify-center flex-shrink-0"
       style={{
         width: size + 4, height: size + 4, imageRendering: "pixelated",
         border: "2px solid #374151",
         background: active ? "#064e3b" : "#1f2937",
-        boxShadow: active ? "0 0 0 2px rgba(16,185,129,0.25), 0 0 10px rgba(16,185,129,0.1)" : "0 1px 3px rgba(0,0,0,0.3)",
         transition: "all 0.3s",
       }}
     >
       <PixelArtSVG rows={sprite.rows} size={size} palette={palette} />
       {active && (
         <motion.div
-          className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 border border-gray-900"
+          className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 border border-gray-900"
           animate={{ opacity: [1, 0.4, 1], scale: [1, 1.2, 1] }}
           transition={{ duration: 0.8, repeat: Infinity }}
         />
@@ -114,20 +113,20 @@ function PixelSprite({ name, size = 24, active = false }: { name: string; size?:
 // ═══════════════════════════════════════════════════════════════
 
 function StatusDot({ status }: { status: TreeNode["status"] }) {
-  if (status === "waiting") return <span className="w-2 h-2 rounded-full bg-gray-600" />;
+  if (status === "waiting") return <span className="w-2 h-2 bg-gray-600" />;
   if (status === "active") return (
     <motion.span
-      className="w-2 h-2 rounded-full bg-green-500"
+      className="w-2 h-2 bg-green-500"
       animate={{ opacity: [1, 0.4, 1] }}
       transition={{ duration: 0.6, repeat: Infinity }}
     />
   );
   if (status === "done") return (
-    <span className="w-2 h-2 rounded-full bg-green-500 flex items-center justify-center">
+    <span className="w-2 h-2 bg-green-500 flex items-center justify-center">
       <svg width="6" height="6" viewBox="0 0 6 6"><path d="M1 3l1.5 1.5L5 1.5" stroke="#fff" strokeWidth="1.2" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </span>
   );
-  return <span className="w-2 h-2 rounded-full bg-red-500" />;
+  return <span className="w-2 h-2 bg-red-500" />;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -336,7 +335,7 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
   // 空状态 / Empty state
   if (!tree || !layout) {
     return (
-      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+      <div className="border border-gray-800 bg-gray-900/60 p-4">
         <button
           disabled
           className="flex items-center gap-2 text-gray-500 cursor-not-allowed"
@@ -354,7 +353,7 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
   }
 
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+    <div className="border border-gray-800 bg-gray-900/60 overflow-hidden">
       {/* 标题栏 / Header bar */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -373,13 +372,13 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
         </span>
         {loading && (
           <motion.span
-            className="ml-auto w-2 h-2 rounded-full bg-green-500"
+            className="ml-auto w-2 h-2 bg-green-500"
             animate={{ opacity: [1, 0.3, 1] }}
             transition={{ duration: 0.8, repeat: Infinity }}
           />
         )}
         {!loading && layout.nodes.length > 0 && (
-          <span className="ml-auto w-2 h-2 rounded-full bg-green-600" />
+          <span className="ml-auto w-2 h-2 bg-green-600" />
         )}
       </button>
 
@@ -447,11 +446,11 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
                     >
                       <motion.div
                         className={`
-                          h-full rounded-xl border px-3 py-2.5 flex items-center gap-2.5
+                          h-full border px-3 py-2.5 flex items-center gap-2.5
                           ${isUser
                             ? "bg-gray-800 border-gray-700"
                             : isActive
-                            ? "bg-gray-800 border-green-500/50 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                            ? "bg-gray-800 border-green-500/50"
                             : isDone
                             ? "bg-gray-800/80 border-gray-700"
                             : "bg-gray-800/80 border-red-500/50"
@@ -459,16 +458,12 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
                           ${isSystem ? "border-dashed" : "border-solid"}
                           transition-all duration-200
                         `}
-                        animate={
-                          isActive
-                            ? { boxShadow: ["0 0 8px rgba(16,185,129,0.1)", "0 0 16px rgba(16,185,129,0.2)", "0 0 8px rgba(16,185,129,0.1)"] }
-                            : {}
-                        }
+                        animate={isActive ? { opacity: [1, 0.85, 1] } : {}}
                         transition={isActive ? { duration: 1.5, repeat: Infinity, ease: "easeInOut" } : {}}
                       >
                         {/* 左侧：精灵图 / Left: sprite */}
                         {isUser ? (
-                          <div className="w-[28px] h-[28px] rounded-md bg-gray-600 flex items-center justify-center flex-shrink-0">
+                          <div className="w-[28px] h-[28px] bg-gray-600 flex items-center justify-center flex-shrink-0">
                             <span className="text-white text-[8px] font-bold pixel-text">YOU</span>
                           </div>
                         ) : (
@@ -485,7 +480,7 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
                               {ln.node.name}
                             </span>
                             {isSystem && (
-                              <span className="pixel-text text-[7px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 border border-gray-600">
+                              <span className="pixel-text text-[7px] px-1.5 py-0.5 bg-gray-700/60 text-gray-400 border border-gray-600">
                                 {ln.node.name === "Router" ? "路由" : ln.node.name === "Planner" ? "规划" : ln.node.name === "仲裁组" ? "仲裁" : "质检"}
                               </span>
                             )}
@@ -509,7 +504,7 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
                         {/* 右侧：完成标记 / Right: done check */}
                         {isDone && !isUser && (
                           <motion.div
-                            className="flex-shrink-0 w-4 h-4 rounded-full bg-green-500/20 flex items-center justify-center"
+                            className="flex-shrink-0 w-4 h-4 bg-green-500/20 flex items-center justify-center"
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ type: "spring", stiffness: 400, damping: 20 }}
@@ -552,7 +547,7 @@ export default function ReasoningTree({ messages, loading }: ReasoningTreeProps)
             <>
               <span className="text-gray-700">·</span>
               <span className="pixel-text text-[8px] text-green-500 flex items-center gap-1">
-                <motion.span className="w-1.5 h-1.5 rounded-full bg-green-500" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity }} />
+                <motion.span className="w-1.5 h-1.5 bg-green-500" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity }} />
                 运行中
               </span>
             </>

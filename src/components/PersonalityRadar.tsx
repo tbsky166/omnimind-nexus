@@ -149,7 +149,7 @@ export function PersonalityEvolution({
   if (changedKeys.length === 0) return null;
 
   return (
-    <div className="mt-3 p-3 bg-ink/5 border border-ink/10">
+    <div className="mt-3 p-3 border-2 border-[#0f0f0f] bg-white">
       <p className="pixel-text text-[10px] tracking-[0.1em] uppercase text-ink/40 mb-2">性格进化</p>
       <div className="space-y-1.5">
         {changedKeys.map((key) => {

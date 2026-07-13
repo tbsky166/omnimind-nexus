@@ -12,17 +12,16 @@ export default function DreamCard({
   onAdopt?: (id: string) => void;
 }) {
   const inspColor = dream.inspirationScore >= 70
-    ? "border-purple-400 bg-purple-50/50"
+    ? "border-purple-400 bg-white"
     : dream.inspirationScore >= 50
-    ? "border-blue-300 bg-blue-50/30"
-    : "border-ink/20";
+    ? "border-blue-300 bg-white"
+    : "border-[#0f0f0f] bg-white";
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       className={`border-2 p-4 ${inspColor} transition-colors`}
-      style={{ boxShadow: "3px 3px 0 rgba(0,0,0,0.05)" }}
     >
       {/* 头部 */}
       <div className="flex items-center justify-between mb-3">
@@ -31,7 +30,7 @@ export default function DreamCard({
           <div>
             <span className="pixel-text text-xs text-ink/70">{dream.agentName}</span>
             {dream.crossDomain && (
-              <span className="ml-2 pixel-text text-[9px] text-purple-500 bg-purple-50 px-1.5 py-0.5 border border-purple-200">
+              <span className="ml-2 pixel-text text-[9px] text-purple-500 bg-white px-1.5 py-0.5 border border-purple-200">
                 🌀 跨领域
               </span>
             )}

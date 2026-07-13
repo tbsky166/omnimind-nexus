@@ -121,10 +121,14 @@ export default function CafePage() {
   const [latestInspiration, setLatestInspiration] = useState<InspirationCard | null>(null);
   const [showInspiration, setShowInspiration] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const currentAgentsRef = useRef<string[]>([]);
+  const inspirationCardsRef = useRef<InspirationCard[]>([]);
 
-  // 加载已保存的灵感卡片 / Load saved inspiration cards
+    // 加载已保存的灵感卡片 / Load saved inspiration cards
   useEffect(() => {
-    setInspirationCards(loadInspirations());
+    const loaded = loadInspirations();
+    setInspirationCards(loaded);
+    inspirationCardsRef.current = loaded;
   }, []);
 
   // 滚动到最新消息 / Scroll to latest message
@@ -138,6 +142,7 @@ export default function CafePage() {
     setChatting(true);
     setMessages([]);
     setCurrentAgents([]);
+    currentAgentsRef.current = [];
     setCurrentTopic("");
     setLatestInspiration(null);
     setShowInspiration(false);
@@ -181,6 +186,7 @@ export default function CafePage() {
 
             if (parsed.type === "cafe_start") {
               setCurrentAgents(parsed.agents);
+              currentAgentsRef.current = parsed.agents;
               setCurrentTopic(parsed.topic || "");
             } else if (parsed.type === "cafe_message") {
               setMessages((prev) => [
@@ -199,15 +205,16 @@ export default function CafePage() {
                 title: parsed.title,
                 content: parsed.content,
                 emoji: parsed.emoji,
-                agents: currentAgents.length > 0 ? currentAgents : [],
+                agents: currentAgentsRef.current.length > 0 ? currentAgentsRef.current : [],
                 timestamp: Date.now(),
               };
               setLatestInspiration(card);
               setShowInspiration(true);
 
               // 保存到 localStorage / Save to localStorage
-              const updated = [card, ...inspirationCards];
+              const updated = [card, ...inspirationCardsRef.current];
               setInspirationCards(updated);
+              inspirationCardsRef.current = updated;
               saveInspirations(updated);
             } else if (parsed.type === "cafe_end") {
               // 完成
@@ -221,7 +228,7 @@ export default function CafePage() {
       console.error("Cafe chat error:", e);
     }
     setChatting(false);
-  }, [settings, inspirationCards, currentAgents]);
+  }, [settings]);
 
   // 删除灵感卡片 / Delete inspiration card
   const handleDeleteCard = (id: string) => {
@@ -242,9 +249,10 @@ export default function CafePage() {
   };
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
       {/* 背景像素网格 / Background pixel grid */}
       <div className="pixel-grid-bg" />
+      
 
       {/* ── 顶部导航 / Nav bar ── */}
       <nav className="nav-bar relative z-10">
@@ -270,7 +278,7 @@ export default function CafePage() {
         </div>
 
         {/* ── 咖啡馆场景 / Cafe scene ── */}
-        <div className="relative mb-8 overflow-hidden rounded-2xl border-2 border-ink/20 shadow-lg">
+        <div className="relative mb-8 overflow-hidden border-2 border-[#0f0f0f]">
           {/* 咖啡馆背景 / Cafe background */}
           <div
             className="relative p-8 min-h-[400px]"
@@ -402,13 +410,11 @@ export default function CafePage() {
                       className="flex flex-col items-center gap-2"
                     >
                       {/* 精灵像素画 / Pixel sprite */}
-                      <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-700/30 backdrop-blur-sm"
-                        style={{ boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}
-                      >
+                      <div className="p-3 bg-white border-2 border-[#e5e5e5]">
                         <PixelSprite name={name} size={64} />
                       </div>
                       {/* Agent 名字 / Agent name */}
-                      <span className="pixel-text text-[10px] text-amber-200/90 font-semibold bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-700/30">
+                      <span className="badge-pixel text-[10px]">
                         {getAgentEmoji(name)} {name}
                       </span>
                       {/* 聊天中指示器 / Chatting indicator */}
@@ -418,9 +424,9 @@ export default function CafePage() {
                           transition={{ duration: 1.5, repeat: Infinity, delay: i * 0.3 }}
                           className="flex gap-1"
                         >
-                          <div className="w-1.5 h-1.5 rounded-full bg-amber-300" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-amber-300" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-amber-300" />
+                          <div className="w-1.5 h-1.5 bg-amber-300" />
+                          <div className="w-1.5 h-1.5 bg-amber-300" />
+                          <div className="w-1.5 h-1.5 bg-amber-300" />
                         </motion.div>
                       )}
                     </motion.div>
@@ -432,7 +438,7 @@ export default function CafePage() {
                     animate={{ opacity: 1 }}
                     className="flex flex-col items-center gap-4 py-12"
                   >
-                    <div className="w-20 h-20 rounded-full bg-amber-950/30 border-2 border-dashed border-amber-600/40 flex items-center justify-center">
+                    <div className="w-20 h-20 bg-white border-2 border-dashed border-[#e5e5e5] flex items-center justify-center">
                       <span className="text-3xl opacity-60">☕</span>
                     </div>
                     <p className="pixel-text text-sm text-amber-200/60">
@@ -445,9 +451,9 @@ export default function CafePage() {
           </div>
 
           {/* ── 操作栏 / Action bar ── */}
-          <div className="relative z-10 bg-gradient-to-r from-amber-950/95 via-amber-900/95 to-amber-950/95 border-t border-amber-700/30 px-6 py-4 flex items-center justify-between">
+          <div className="relative z-10 bg-white border-t-2 border-[#0f0f0f] px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span className="pixel-text text-[11px] text-amber-300/80">
+              <span className="pixel-text text-[11px] text-ink">
                 {currentTopic ? (
                   <>💬 话题：{currentTopic}</>
                 ) : (
@@ -455,14 +461,14 @@ export default function CafePage() {
                 )}
               </span>
               {currentAgents.length > 0 && (
-                <span className="badge badge-outline !text-amber-300/70 !border-amber-600/40">
+                <span className="badge-pixel">
                   {currentAgents.join(" · ")}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-3">
               {!settings.apiKey && (
-                <span className="badge badge-outline !text-danger/70 !border-danger/30">
+                <span className="badge-pixel">
                   ⚠ 请先配置 API Key
                 </span>
               )}
@@ -496,13 +502,13 @@ export default function CafePage() {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="card-pixel p-6 mb-8"
+              className="pixel-area pixel-area-hover p-6 mb-8"
             >
               <h2 className="section-title">
                 <span>💬</span> 咖啡馆对话
                 {chatting && (
-                  <span className="badge badge-outline ml-auto !text-warning/80 !border-warning/40">
-                    <span className="inline-block w-1.5 h-1.5 bg-warning rounded-full animate-pulse mr-1.5" />
+                  <span className="badge-pixel ml-auto">
+                    <span className="inline-block w-1.5 h-1.5 bg-warning animate-pulse mr-1.5" />
                     进行中...
                   </span>
                 )}
@@ -520,7 +526,7 @@ export default function CafePage() {
                       className="flex gap-3 items-start"
                     >
                       {/* 头像 / Avatar */}
-                      <div className="shrink-0 w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 flex items-center justify-center">
+                      <div className="shrink-0 w-10 h-10 bg-white border-2 border-[#e5e5e5] flex items-center justify-center">
                         <EmojiSVG emoji={msg.emoji} size={20} />
                       </div>
                       {/* 气泡 / Bubble */}
@@ -530,17 +536,15 @@ export default function CafePage() {
                             {msg.speaker}
                           </span>
                           {agentInfo && (
-                            <span className="badge badge-outline !text-[9px]">
+                            <span className="badge-pixel !text-[9px]">
                               {agentInfo.role}
                             </span>
                           )}
                           {isLast && chatting && (
-                            <span className="inline-block w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
+                            <span className="inline-block w-1.5 h-1.5 bg-success animate-pulse" />
                           )}
                         </div>
-                        <div className="relative bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl rounded-tl-sm px-4 py-3 border border-amber-200/60"
-                          style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}
-                        >
+                        <div className="relative bg-white border-2 border-[#e5e5e5] px-4 py-3">
                           <p className="pixel-text text-xs text-ink/80 leading-relaxed">
                             {msg.content}
                           </p>
@@ -557,7 +561,7 @@ export default function CafePage() {
 
         {/* ── 聊天中加载状态 / Chatting loading state ── */}
         {chatting && messages.length === 0 && (
-          <div className="card-pixel p-10 mb-8 text-center">
+          <div className="pixel-area p-10 mb-8 text-center">
             <div className="flex items-center justify-center gap-2 mb-4">
               {[0, 1, 2].map((i) => (
                 <motion.div
@@ -587,12 +591,7 @@ export default function CafePage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9 }}
               transition={{ duration: 0.5, type: "spring" }}
-              className="relative mb-8 p-6 rounded-2xl overflow-hidden"
-              style={{
-                background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 30%, #fcd34d 60%, #fbbf24 100%)",
-                border: "2px solid #f59e0b",
-                boxShadow: "0 8px 32px rgba(245, 158, 11, 0.25)",
-              }}
+              className="relative mb-8 p-6 overflow-hidden border-2 border-[#0f0f0f] bg-white"
             >
               {/* 闪光装饰 / Sparkle decorations */}
               <motion.div
@@ -621,7 +620,7 @@ export default function CafePage() {
                     {latestInspiration.emoji}
                   </motion.span>
                   <div>
-                    <span className="badge badge-outline !text-amber-700 !border-amber-500 !bg-amber-100/50">
+                    <span className="badge-pixel">
                       🎴 灵感卡片
                     </span>
                   </div>
@@ -643,10 +642,10 @@ export default function CafePage() {
         </AnimatePresence>
 
         {/* ── 灵感卡片收藏 / Inspiration card collection ── */}
-        <div className="card-pixel p-6">
+        <div className="pixel-area pixel-area-hover p-6">
           <h2 className="section-title">
             <span>🎴</span> 灵感卡片收藏
-            <span className="badge badge-outline ml-auto">
+            <span className="badge-pixel ml-auto">
               {inspirationCards.length} 张
             </span>
           </h2>
@@ -662,9 +661,8 @@ export default function CafePage() {
                   className="relative group"
                 >
                   <div
-                    className="p-4 rounded-xl border-2 transition-all duration-200 hover:shadow-lg"
+                    className="p-4 border-2 transition-all duration-200 bg-white"
                     style={{
-                      background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
                       borderColor: "#fcd34d",
                     }}
                   >
@@ -688,7 +686,7 @@ export default function CafePage() {
                       {card.agents.map((name) => (
                         <span
                           key={name}
-                          className="badge badge-outline !text-[9px] !text-amber-600 !border-amber-400/50"
+                          className="badge-pixel !text-[9px]"
                         >
                           {getAgentEmoji(name)} {name}
                         </span>
@@ -703,7 +701,7 @@ export default function CafePage() {
             </div>
           ) : (
             <div className="empty-state">
-              <span className="empty-icon">🎴</span>
+              <span className="empty-icon">✦</span>
               <p className="empty-title">还没有灵感卡片</p>
               <p className="empty-desc">
                 让 Agent 们在咖啡馆里聊天，也许会有意想不到的灵感迸发！

@@ -350,8 +350,33 @@ export const DOC_TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "codebase_edit",
+      description: "修改项目代码库中的源文件。通过精确字符串替换实现编辑。必须先使用 codebase_read 读取文件内容，获取要替换的精确文本，然后调用此工具。old_string 必须在文件中唯一匹配，否则会失败。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description: "项目内的相对文件路径，如 src/lib/swarm.ts、src/app/page.tsx 等",
+          },
+          old_string: {
+            type: "string",
+            description: "要替换的精确文本内容（必须与文件中的原始文本完全一致，包括缩进、空格、换行）。必须唯一匹配。",
+          },
+          new_string: {
+            type: "string",
+            description: "替换后的新文本内容",
+          },
+        },
+        required: ["path", "old_string", "new_string"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "web_search",
-      description: "联网搜索最新信息。当需要查询实时数据、最新新闻、技术文档、事实核查或任何超出 AI 知识范围的信息时使用。通过 DuckDuckGo 引擎获取搜索结果。",
+      description: "联网搜索最新信息。当需要查询实时数据、最新新闻、技术文档、事实核查或任何超出 AI 知识范围的信息时使用。通过 Tavily 搜索引擎获取结果。",
       parameters: {
         type: "object",
         properties: {
@@ -420,16 +445,19 @@ ${agent.description}
 5. 你是最终交付负责人时，完成分析后应调用 generate_document 工具生成正式文档
 6. 调用 codebase_read 工具可以读取项目的完整源代码——包括 agent 定义、系统组件、API 路由、工具库、DSL 解析器、蜂群/进化/知识图谱/元认知引擎等所有模块
 7. 调用 codebase_list 工具可以浏览项目目录结构，了解项目整体组织方式
+8. 调用 codebase_edit 工具可以修改项目源代码文件——必须先 codebase_read 读取文件，再提供精确的 old_string 进行替换
 
 ## 可用工具
 - **codebase_read**：读取项目代码库中的任意源文件（.ts、.tsx、.json 等），禁止访问 .env、node_modules、.git
 - **codebase_list**：列出项目目录结构，查看文件组织
+- **codebase_edit**：通过精确字符串替换修改项目源文件（必须先 codebase_read 读取）
 - **file_read**：读取 Agent 工作区文件（/workspace/）
 - **file_write**：在 Agent 工作区创建/编辑文件
 - **generate_document**：生成可下载的正式文档（docx/xlsx）
 
 ## 工具使用要求（重要）
 - **需要产出代码、配置、脚本时，必须调用 file_write 工具创建文件，禁止直接在回复中粘贴代码块**
+- **需要修改项目源码时，必须先 codebase_read 读取文件，再调用 codebase_edit 工具进行精确替换**
 - **需要产出报告、方案、文档时，必须调用 generate_document 工具生成正式文档**
 - **需要查看代码库时，必须调用 codebase_read 工具读取实际源码，不要凭记忆编造代码内容**
 - **需要查询最新信息、实时数据、新闻、技术文档时，必须调用 web_search 工具联网搜索**

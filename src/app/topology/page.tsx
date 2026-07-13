@@ -32,6 +32,7 @@ export default function TopologyPage() {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<number>(0);
 
   const WIDTH = 700;
@@ -43,7 +44,6 @@ export default function TopologyPage() {
       .then((data) => {
         setNodes(data.nodes || []);
         setEdges(data.edges || []);
-        // 初始化位置：圆形布局 / Initialize positions: circular layout
         const posMap = new Map<string, NodePosition>();
         const nodeCount = (data.nodes || []).length;
         (data.nodes || []).forEach((node: TopologyNode, i: number) => {
@@ -63,14 +63,14 @@ export default function TopologyPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  // ── 力导向布局模拟 / Force-directed layout simulation ──
+  // 力导向布局模拟
   const simulate = useCallback(() => {
     if (nodes.length === 0) return;
     setPositions((prev) => {
       const pos = new Map(prev);
       const posArr = Array.from(pos.values());
 
-      // 斥力 / Repulsion
+      // 斥力
       for (let i = 0; i < posArr.length; i++) {
         for (let j = i + 1; j < posArr.length; j++) {
           const a = posArr[i];
@@ -86,7 +86,7 @@ export default function TopologyPage() {
         }
       }
 
-      // 引力（边）/ Attraction (edges)
+      // 引力（边）
       for (const edge of edges) {
         const a = pos.get(edge.source);
         const b = pos.get(edge.target);
@@ -101,23 +101,19 @@ export default function TopologyPage() {
         if (b.id !== dragging) { b.vx -= fx; b.vy -= fy; }
       }
 
-      // 中心引力 / Center gravity
+      // 中心引力
       for (const p of posArr) {
         if (p.id === dragging) continue;
         p.vx += (WIDTH / 2 - p.x) * 0.005;
         p.vy += (HEIGHT / 2 - p.y) * 0.005;
-        // 阻尼 / Damping
         p.vx *= 0.85;
         p.vy *= 0.85;
-        // 更新位置 / Update position
         p.x += p.vx;
         p.y += p.vy;
-        // 边界 / Boundaries
         p.x = Math.max(40, Math.min(WIDTH - 40, p.x));
         p.y = Math.max(30, Math.min(HEIGHT - 30, p.y));
       }
 
-      // 写回 / Write back
       for (const p of posArr) {
         pos.set(p.id, { ...p });
       }
@@ -134,12 +130,14 @@ export default function TopologyPage() {
     }
   }, [simulate, nodes.length, loading]);
 
-  // ── 拖拽 / Drag handling ──
+  // 拖拽处理
   const handleMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(nodeId);
   };
-  const handleMouseMove = (e: React.MouseEvent) => {
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragging || !svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * WIDTH;
@@ -150,8 +148,20 @@ export default function TopologyPage() {
       if (node) { node.x = x; node.y = y; node.vx = 0; node.vy = 0; }
       return pos;
     });
-  };
-  const handleMouseUp = () => setDragging(null);
+  }, [dragging]);
+
+  const handleMouseUp = useCallback(() => {
+    setDragging(null);
+  }, []);
+
+  // 全局监听 mouseup，防止拖出 SVG 后松手丢失
+  useEffect(() => {
+    if (dragging) {
+      const handleGlobalUp = () => setDragging(null);
+      window.addEventListener("mouseup", handleGlobalUp);
+      return () => window.removeEventListener("mouseup", handleGlobalUp);
+    }
+  }, [dragging]);
 
   const maxCount = Math.max(...nodes.map((n) => n.count), 1);
   const connectedNodes = new Set<string>();
@@ -163,9 +173,13 @@ export default function TopologyPage() {
   }
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      {/* 像素网格背景 */}
+      <div className="pixel-grid-bg" />
+      
+
       {/* 顶部导航 */}
-      <nav className="nav-bar">
+      <nav className="nav-bar relative z-10">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/" className="nav-link">← 返回</Link>
           <span className="pixel-text text-[10px] text-ink/40 uppercase tracking-[0.12em]">🌐 拓扑图</span>
@@ -173,7 +187,7 @@ export default function TopologyPage() {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto px-4 py-10">
+      <div className="relative z-10 max-w-4xl mx-auto px-4 py-10">
         <div className="page-header">
           <p className="page-label">协作关系图</p>
           <h1>协作拓扑图</h1>
@@ -184,24 +198,35 @@ export default function TopologyPage() {
           <div className="pixel-text text-sm text-ink/30 text-center py-16">加载中...</div>
         ) : nodes.length === 0 ? (
           <div className="empty-state">
-            <EmojiSVG emoji="🌐" size={40} />
+            <span className="empty-icon">✦</span>
             <p className="empty-title">暂无协作数据</p>
             <p className="empty-desc">Agent 协作后，这里会显示协作关系图</p>
           </div>
         ) : (
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
             {/* SVG 图表 */}
-            <div className="card-pixel p-1 mb-6">
+            <div
+              ref={containerRef}
+              className="pixel-area pixel-area-hover p-1 mb-6"
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+            >
               <svg
                 ref={svgRef}
                 viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-                className="w-full rounded-lg"
+                className="w-full block"
                 style={{ height: "auto", minHeight: 400, background: "#fafbfc" }}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
               >
-                {/* 边 / Edges */}
+                {/* 网格背景 */}
+                <defs>
+                  <pattern id="topoGrid" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" strokeWidth="0.5" />
+                  </pattern>
+                </defs>
+                <rect width="800" height="500" fill="url(#topoGrid)" />
+
+                {/* 边 */}
                 {edges.map((edge, i) => {
                   const a = positions.get(edge.source);
                   const b = positions.get(edge.target);
@@ -215,7 +240,7 @@ export default function TopologyPage() {
                       y1={a.y}
                       x2={b.x}
                       y2={b.y}
-                      stroke={isHighlighted ? "#6366f1" : "#9ca3af"}
+                      stroke={isHighlighted ? "#0f0f0f" : "#9ca3af"}
                       strokeWidth={Math.min(edge.weight * 1.5 + 1, 5)}
                       opacity={opacity}
                       strokeLinecap="round"
@@ -223,7 +248,7 @@ export default function TopologyPage() {
                   );
                 })}
 
-                {/* 节点 / Nodes */}
+                {/* 节点 */}
                 {nodes.map((node) => {
                   const pos = positions.get(node.id);
                   if (!pos) return null;
@@ -243,16 +268,15 @@ export default function TopologyPage() {
                     >
                       <circle
                         r={r}
-                        fill={isHovered ? "#6366f1" : "#fff"}
-                        stroke={isConnected ? "#6366f1" : "#1a1a1a"}
+                        fill={isHovered ? "#0f0f0f" : "#ffffff"}
+                        stroke={isConnected ? "#0f0f0f" : "#0f0f0f"}
                         strokeWidth={isConnected ? 2.5 : 2}
-                        filter={isHovered ? "drop-shadow(0 2px 4px rgba(99,102,241,0.3))" : undefined}
                       />
                       <text
                         textAnchor="middle"
                         dy="0.35em"
                         fontSize={Math.max(8, r * 0.35)}
-                        fill={isHovered ? "#fff" : "#1a1a1a"}
+                        fill={isHovered ? "#ffffff" : "#0f0f0f"}
                         style={{ fontWeight: "bold", pointerEvents: "none", fontFamily: "monospace" }}
                       >
                         {node.label.slice(0, 8)}
@@ -275,10 +299,10 @@ export default function TopologyPage() {
             {/* 图例 */}
             <div className="flex items-center flex-wrap gap-5 pixel-text text-[10px] text-ink/40">
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-primary inline-block" /> 节点大小 = 使用频率
+                <span className="w-3 h-3 border-2 border-[#0f0f0f] bg-white inline-block" /> 节点大小 = 使用频率
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <span className="w-4 h-0.5 bg-primary inline-block" /> 线条粗细 = 协作次数
+                <span className="w-4 h-0.5 bg-[#0f0f0f] inline-block" /> 线条粗细 = 协作次数
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <EmojiSVG emoji="💡" size={12} /> 拖拽节点可调整位置

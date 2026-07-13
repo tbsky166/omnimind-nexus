@@ -725,9 +725,9 @@ export default function CanvasPage() {
 
   if (!loaded) {
     return (
-      <main className="min-h-screen bg-surface flex items-center justify-center">
+      <main className="min-h-screen bg-white flex items-center justify-center">
         <div className="empty-state">
-          <div className="empty-icon">🎨</div>
+          <div className="empty-icon">✦</div>
           <p className="empty-title">加载中...</p>
         </div>
       </main>
@@ -735,7 +735,11 @@ export default function CanvasPage() {
   }
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      {/* 背景像素网格 / Background pixel grid */}
+      <div className="pixel-grid-bg" />
+      
+
       {/* 顶部导航 */}
       <nav className="nav-bar">
         <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between">
@@ -761,7 +765,7 @@ export default function CanvasPage() {
 
         {/* 工具栏 */}
         <motion.div
-          className="card p-4 mb-6"
+          className="pixel-area pixel-area-hover p-4 mb-6"
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
@@ -778,7 +782,7 @@ export default function CanvasPage() {
             </div>
 
             {/* 分隔线 */}
-            <div className="w-px h-6 bg-grid" />
+            <div className="w-px h-6 bg-[#e5e5e5]" />
 
             {/* 颜色选择器 */}
             <div className="flex items-center gap-1.5">
@@ -786,10 +790,10 @@ export default function CanvasPage() {
               {PRESET_COLORS.map((color) => (
                 <button
                   key={color}
-                  className={`w-6 h-6 rounded-full border-2 transition-all duration-150 ${
+                  className={`w-6 h-6 border-2 transition-all duration-150 ${
                     currentColor === color
-                      ? "border-ink scale-110 shadow-md"
-                      : "border-grid hover:border-grid-hover"
+                      ? "border-[#0f0f0f]"
+                      : "border-[#e5e5e5]"
                   }`}
                   style={{ backgroundColor: color }}
                   onClick={() => setCurrentColor(color)}
@@ -799,7 +803,7 @@ export default function CanvasPage() {
             </div>
 
             {/* 分隔线 */}
-            <div className="w-px h-6 bg-grid" />
+            <div className="w-px h-6 bg-[#e5e5e5]" />
 
             {/* 线宽 */}
             <div className="flex items-center gap-2">
@@ -816,7 +820,7 @@ export default function CanvasPage() {
             </div>
 
             {/* 分隔线 */}
-            <div className="w-px h-6 bg-grid" />
+            <div className="w-px h-6 bg-[#e5e5e5]" />
 
             {/* 操作按钮 */}
             <div className="flex items-center gap-1.5">
@@ -847,7 +851,7 @@ export default function CanvasPage() {
             </div>
 
             {/* 分隔线 */}
-            <div className="w-px h-6 bg-grid" />
+            <div className="w-px h-6 bg-[#e5e5e5]" />
 
             {/* Agent 绘制 */}
             <button
@@ -858,7 +862,7 @@ export default function CanvasPage() {
             >
               {agentLoading ? (
                 <>
-                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent animate-spin" />
                   绘制中...
                 </>
               ) : (
@@ -873,7 +877,7 @@ export default function CanvasPage() {
           <AnimatePresence>
             {agentMessage && (
               <motion.div
-                className="mt-3 px-3 py-2 rounded-lg bg-primary-soft text-primary text-[0.6875rem] pixel-text"
+                className="mt-3 px-3 py-2 bg-white border-2 border-[#e5e5e5] text-ink text-[0.6875rem] pixel-text"
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
@@ -888,7 +892,7 @@ export default function CanvasPage() {
         <div className="flex flex-col lg:flex-row gap-6">
           {/* SVG 画布 */}
           <motion.div
-            className="flex-1 card overflow-hidden"
+            className="flex-1 pixel-area pixel-area-hover overflow-hidden"
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.4, delay: 0.1 }}
@@ -958,7 +962,7 @@ export default function CanvasPage() {
                     <div className="flex items-center gap-1">
                       <input
                         autoFocus
-                        className="px-2 py-1 text-xs border-2 border-primary rounded outline-none bg-white w-32"
+                        className="px-2 py-1 text-xs border-2 border-[#0f0f0f] outline-none bg-white w-32"
                         value={textValue}
                         onChange={(e) => setTextValue(e.target.value)}
                         onKeyDown={(e) => {
@@ -982,12 +986,12 @@ export default function CanvasPage() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.4, delay: 0.2 }}
           >
-            <div className="card p-4">
+            <div className="pixel-area pixel-area-hover p-4">
               <h2 className="section-title mb-3">📋 元素列表</h2>
 
               {elements.length === 0 ? (
                 <div className="empty-state py-6">
-                  <div className="empty-icon">🎨</div>
+                  <div className="empty-icon">✦</div>
                   <p className="empty-title">画布为空</p>
                   <p className="empty-desc">使用工具栏开始绘制</p>
                 </div>
@@ -1018,10 +1022,10 @@ export default function CanvasPage() {
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0, x: 10 }}
-                          className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all duration-150 ${
+                          className={`flex items-center gap-2 p-2 border-2 cursor-pointer transition-all duration-150 ${
                             selectedId === el.id
-                              ? "border-primary bg-primary-soft"
-                              : "border-grid hover:border-grid-hover hover:bg-surface"
+                              ? "border-[#0f0f0f] bg-white"
+                              : "border-[#e5e5e5] hover:border-[#0f0f0f]"
                           }`}
                           onClick={() => setSelectedId(el.id)}
                         >
@@ -1032,7 +1036,7 @@ export default function CanvasPage() {
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <span
-                                className="w-2.5 h-2.5 rounded-full border border-grid"
+                                className="w-2.5 h-2.5 border-2 border-[#e5e5e5]"
                                 style={{ backgroundColor: el.color }}
                               />
                               <span className="pixel-text text-[0.5625rem] text-muted">
@@ -1063,7 +1067,7 @@ export default function CanvasPage() {
               )}
 
               {/* 导出按钮 */}
-              <div className="mt-4 pt-4 border-t border-grid">
+              <div className="mt-4 pt-4 border-t-2 border-[#e5e5e5]">
                 <button
                   className="btn-pixel-dark w-full text-[0.6875rem] py-2 flex items-center justify-center gap-2"
                   onClick={exportSVG}
@@ -1080,7 +1084,7 @@ export default function CanvasPage() {
               </div>
 
               {/* 快捷键提示 */}
-              <div className="mt-3 p-3 rounded-lg bg-surface border border-grid">
+              <div className="mt-3 p-3 bg-white border-2 border-[#e5e5e5]">
                 <p className="pixel-text text-[0.5625rem] text-muted mb-1.5">快捷键</p>
                 <div className="space-y-1 pixel-text text-[0.5625rem] text-muted">
                   <div className="flex justify-between">

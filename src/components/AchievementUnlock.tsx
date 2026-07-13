@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { onAchievementUnlock, getRarityColor, getRarityBg } from "@/lib/achievements";
+import { onAchievementUnlock, getRarityColor } from "@/lib/achievements";
 import type { Achievement } from "@/lib/achievements";
 import EmojiSVG from "@/components/EmojiSVG";
 
@@ -37,7 +37,6 @@ export default function AchievementUnlock() {
   }, [queue, current]);
 
   const clr = current ? getRarityColor(current.achievement.rarity) : "#6366f1";
-  const bg = current ? getRarityBg(current.achievement.rarity) : "#eef2ff";
 
   return (
     <AnimatePresence>
@@ -46,14 +45,15 @@ export default function AchievementUnlock() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none"
+          className="fixed inset-0 z-[9999] flex items-center justify-center"
         >
           {/* 背景遮罩 */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 0.6 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black"
+            className="absolute inset-0 bg-black cursor-pointer"
+            onClick={() => setCurrent(null)}
           />
 
           {/* 粒子爆发效果 */}
@@ -61,7 +61,7 @@ export default function AchievementUnlock() {
             {Array.from({ length: 30 }).map((_, i) => (
               <motion.div
                 key={i}
-                className="absolute rounded-full"
+                className="absolute"
                 style={{
                   width: 4 + Math.random() * 8,
                   height: 4 + Math.random() * 8,
@@ -87,16 +87,24 @@ export default function AchievementUnlock() {
             animate={{ scale: 1, opacity: 1, rotateX: 0 }}
             exit={{ scale: 0.5, opacity: 0, rotateX: -20 }}
             transition={{ type: "spring", stiffness: 200, damping: 20 }}
-            className="relative z-10 px-10 py-8 rounded-2xl text-center"
-            style={{ background: bg, border: `2px solid ${clr}`, boxShadow: `0 0 60px ${clr}33, 0 20px 60px rgba(0,0,0,0.2)` }}
+            className="relative z-10 px-10 py-8 text-center border-2 bg-white"
+            style={{ borderColor: clr }}
+            onClick={e => e.stopPropagation()}
           >
+            {/* 关闭按钮 */}
+            <button
+              onClick={() => setCurrent(null)}
+              className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center border border-ink/20 hover:bg-gray-100"
+            >
+              <span className="text-xs">×</span>
+            </button>
             {/* 稀有度标签 */}
             <motion.div
               initial={{ y: -20, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.3 }}
-              className="inline-block mb-3 px-3 py-0.5 rounded-full text-[10px] font-bold tracking-[0.15em] uppercase"
-              style={{ background: clr, color: "#fff" }}
+              className="inline-block mb-3 px-3 py-0.5 text-[10px] font-bold tracking-[0.15em] uppercase border-2"
+              style={{ background: clr, color: "#fff", borderColor: clr }}
             >
               {current.achievement.rarity === "legendary" ? "传奇" : current.achievement.rarity === "epic" ? "史诗" : current.achievement.rarity === "rare" ? "稀有" : "普通"}
             </motion.div>

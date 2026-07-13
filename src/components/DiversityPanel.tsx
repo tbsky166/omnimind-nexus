@@ -22,7 +22,7 @@ export default function DiversityPanel() {
 
   if (loading) {
     return (
-      <div className="border-2 border-ink/10 p-4 animate-pulse">
+      <div className="border-2 border-[#e5e5e5] bg-white p-4 animate-pulse">
         <div className="h-4 bg-ink/10 w-1/3 mb-3" />
         <div className="h-20 bg-ink/5" />
       </div>
@@ -31,7 +31,7 @@ export default function DiversityPanel() {
 
   if (!metrics) {
     return (
-      <div className="border-2 border-ink/10 p-4 text-center">
+      <div className="border-2 border-[#e5e5e5] bg-white p-4 text-center">
         <p className="pixel-text text-xs text-ink/40">暂无多样性数据</p>
         <p className="pixel-text text-[10px] text-ink/30 mt-1">完成一次多 Agent 协作后自动生成</p>
       </div>
@@ -51,17 +51,16 @@ export default function DiversityPanel() {
   }[metrics.groupthinkRisk];
 
   const riskBg = {
-    low: "bg-green-50 border-green-200",
-    medium: "bg-amber-50 border-amber-200",
-    high: "bg-red-50 border-red-200",
+    low: "bg-white border-[#0f0f0f]",
+    medium: "bg-white border-[#0f0f0f]",
+    high: "bg-white border-[#0f0f0f]",
   }[metrics.groupthinkRisk];
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="border-2 border-ink/20 p-4"
-      style={{ boxShadow: "3px 3px 0 #e5e7eb" }}
+      className="border-2 border-[#0f0f0f] bg-white p-4"
     >
       <h3 className="pixel-text text-xs tracking-[0.1em] uppercase text-ink/50 mb-3">
         🧠 认知多样性指数
@@ -96,7 +95,7 @@ export default function DiversityPanel() {
             <span className="pixel-text text-[10px] text-ink/50">识别视角</span>
             <span className="pixel-text text-xs text-ink">{metrics.perspectiveCount} 个</span>
           </div>
-          <div className={`inline-flex items-center gap-1 px-2 py-0.5 border text-[10px] pixel-text ${riskBg} ${riskColor}`}>
+          <div className={`inline-flex items-center gap-1 px-2 py-0.5 border-2 text-[10px] pixel-text ${riskBg} ${riskColor}`}>
             群体思维：{riskLabel}
           </div>
         </div>

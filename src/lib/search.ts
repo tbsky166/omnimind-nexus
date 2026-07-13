@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
-// 联网搜索工具 — DuckDuckGo Instant Answer API（免费，无需 API Key）
-// Web Search Tool — DuckDuckGo Instant Answer API (free, no API key required)
+// 联网搜索工具 — Tavily Search API（专为 AI Agent 设计）
+// Web Search Tool — Tavily Search API (designed for AI Agents)
+// 免费额度：1000 次/月  |  注册：https://tavily.com
 // ═══════════════════════════════════════════════════════════════════════
 
 /** 单条搜索结果 / Single search result */
@@ -8,129 +9,87 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  score?: number;
 }
 
 /** 搜索响应 / Search response */
 export interface SearchResponse {
   query: string;
-  abstract: string;           // DuckDuckGo 摘要
-  abstractSource: string;     // 摘要来源
-  answer: string;             // 即时答案（如计算、定义）
-  results: SearchResult[];    // 相关结果列表
-  relatedTopics: string[];    // 相关主题
-  searchTime: number;         // 搜索耗时 ms
+  answer: string;
+  results: SearchResult[];
+  searchTime: number;
 }
 
-// ── DuckDuckGo Instant Answer API 调用 / DuckDuckGo Instant Answer API call ──
-async function duckduckgoInstantAnswer(query: string): Promise<{
-  Abstract: string;
-  AbstractText: string;
-  AbstractSource: string;
-  AbstractURL: string;
-  Answer: string;
-  AnswerType: string;
-  Heading: string;
-  RelatedTopics: Array<{ Text: string; FirstURL: string; Result?: string }>;
-  Results: Array<{ Text: string; FirstURL: string }>;
-}> {
-  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "OmniMind-Nexus/1.0" },
-    signal: AbortSignal.timeout(10000),
+/** Tavily API 原始响应类型 */
+interface TavilyResult {
+  title: string;
+  url: string;
+  content: string;
+  score: number;
+  raw_content?: string;
+}
+
+interface TavilyResponse {
+  query: string;
+  answer?: string;
+  results: TavilyResult[];
+  response_time?: number;
+}
+
+// ── Tavily Search API 调用 ──
+async function tavilySearch(query: string, apiKey: string): Promise<TavilyResponse> {
+  const res = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      query,
+      search_depth: "basic",
+      include_answer: true,
+      include_raw_content: false,
+      max_results: 5,
+    }),
+    signal: AbortSignal.timeout(15000),
   });
-  if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
+
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const err = JSON.parse(text);
+      msg = err.detail?.error || err.message || err.error || text;
+    } catch {}
+    throw new Error(`Tavily API error (${res.status}): ${msg}`);
+  }
+
   return res.json();
 }
 
-// ── 也尝试从 DuckDuckGo HTML 搜索获取更丰富的结果 / Also try HTML search for richer results ──
-async function duckduckgoHTMLSearch(query: string): Promise<SearchResult[]> {
-  try {
-    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    // 解析搜索结果 / Parse search results
-    const results: SearchResult[] = [];
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([^<]*)<\/a>/gi;
-    let match;
-    while ((match = resultRegex.exec(html)) !== null) {
-      results.push({
-        title: match[2].trim(),
-        url: match[1].trim(),
-        snippet: match[3].trim(),
-      });
-    }
-    return results.slice(0, 8);
-  } catch {
-    return [];
-  }
-}
-
 // ── 主搜索函数 / Main search function ──
-export async function webSearch(query: string): Promise<SearchResponse> {
+export async function webSearch(query: string, apiKey?: string): Promise<SearchResponse> {
   const startTime = Date.now();
 
-  // 并行调用两个 API / Parallel calls to both APIs
-  const [instantResult, htmlResults] = await Promise.allSettled([
-    duckduckgoInstantAnswer(query),
-    duckduckgoHTMLSearch(query),
-  ]);
-
-  const instant = instantResult.status === "fulfilled" ? instantResult.value : null;
-  const html = htmlResults.status === "fulfilled" ? htmlResults.value : [];
-
-  // 合并结果 / Merge results
-  const results: SearchResult[] = [];
-
-  // 从 Instant Answer 提取结果
-  if (instant?.Results) {
-    for (const r of instant.Results) {
-      results.push({
-        title: r.Text.split(" - ")[0] || r.Text,
-        url: r.FirstURL,
-        snippet: r.Text,
-      });
-    }
+  if (!apiKey) {
+    throw new Error("未配置 Tavily API Key，请在设置页面填写");
   }
 
-  // 从 RelatedTopics 提取
-  if (instant?.RelatedTopics) {
-    for (const topic of instant.RelatedTopics) {
-      if (topic.Text && topic.FirstURL) {
-        results.push({
-          title: topic.Text.split(" - ")[0] || topic.Text,
-          url: topic.FirstURL,
-          snippet: topic.Result || topic.Text,
-        });
-      }
-    }
-  }
+  const data = await tavilySearch(query, apiKey);
 
-  // 合并 HTML 搜索结果
-  for (const hr of html) {
-    if (!results.some(r => r.url === hr.url)) {
-      results.push(hr);
-    }
-  }
+  const results: SearchResult[] = (data.results || []).map((r) => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.content,
+    score: r.score,
+  }));
 
   const searchTime = Date.now() - startTime;
 
   return {
-    query,
-    abstract: instant?.AbstractText || instant?.Abstract || "",
-    abstractSource: instant?.AbstractSource || "",
-    answer: instant?.Answer || "",
-    results: results.slice(0, 10),
-    relatedTopics: instant?.RelatedTopics
-      ?.filter((t: { Text: string }) => t.Text && !t.Text.includes("category"))
-      .map((t: { Text: string }) => t.Text.split(" - ")[0])
-      .slice(0, 5) || [],
+    query: data.query,
+    answer: data.answer || "",
+    results,
     searchTime,
   };
 }
@@ -140,23 +99,21 @@ export function formatSearchResults(response: SearchResponse): string {
   const parts: string[] = [];
 
   if (response.answer) {
-    parts.push(`📌 即时答案：${response.answer}`);
+    parts.push(`📌 **AI 摘要**：${response.answer}`);
+    parts.push("");
   }
-  if (response.abstract) {
-    parts.push(`📖 摘要：${response.abstract}${response.abstractSource ? `（来源：${response.abstractSource}）` : ""}`);
-  }
-  if (response.relatedTopics.length > 0) {
-    parts.push(`🔗 相关主题：${response.relatedTopics.join("、")}`);
-  }
+
   if (response.results.length > 0) {
-    parts.push("\n📋 搜索结果：");
+    parts.push("📋 **搜索结果**：");
     for (let i = 0; i < response.results.length; i++) {
       const r = response.results[i];
-      parts.push(`${i + 1}. **${r.title}**\n   ${r.snippet}\n   ${r.url}`);
+      parts.push(`${i + 1}. [${r.title}](${r.url})`);
+      parts.push(`   ${r.snippet}`);
+      parts.push("");
     }
   }
 
-  parts.push(`\n⏱ 搜索耗时：${response.searchTime}ms | 引擎：DuckDuckGo`);
+  parts.push(`⏱ 搜索耗时：${response.searchTime}ms | 引擎：Tavily`);
 
   return parts.join("\n");
 }

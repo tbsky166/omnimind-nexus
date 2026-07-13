@@ -46,7 +46,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      <div className="pixel-grid-bg" />
+      
       {/* 顶部导航 */}
       <nav className="nav-bar">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -64,7 +66,7 @@ export default function SettingsPage() {
         </div>
 
         {/* API 配置 */}
-        <div className="card p-6 mb-6">
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
             <EmojiSVG emoji="⚙️" size={14} /> API 配置
           </h2>
@@ -117,7 +119,7 @@ export default function SettingsPage() {
         </div>
 
         {/* 嵌入模型配置 */}
-        <div className="card p-6 mb-6">
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
             <EmojiSVG emoji="📚" size={14} /> 嵌入模型配置（知识库专用）
           </h2>
@@ -156,8 +158,29 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Tavily 联网搜索 */}
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
+          <h2 className="section-title">
+            <EmojiSVG emoji="🌐" size={14} /> 联网搜索 — Tavily API
+          </h2>
+          <p className="pixel-text text-[10px] text-ink/40 mb-4">
+            Agent 需要联网搜索时使用 Tavily Search API。免费额度 1000 次/月，
+            <a href="https://tavily.com" target="_blank" className="text-blue-500 hover:underline ml-1">注册获取 API Key →</a>
+          </p>
+          <div>
+            <label className="pixel-text text-[10px] tracking-[0.1em] uppercase text-ink/50 block mb-1.5">Tavily API Key</label>
+            <input
+              type="password"
+              value={local.tavilyApiKey}
+              onChange={(e) => setLocal({ ...local, tavilyApiKey: e.target.value })}
+              placeholder="tvly-..."
+              className="input-pixel"
+            />
+          </div>
+        </div>
+
         {/* 模型参数 */}
-        <div className="card p-6 mb-6">
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
             <EmojiSVG emoji="📊" size={14} /> 模型参数
           </h2>
@@ -189,7 +212,7 @@ export default function SettingsPage() {
         </div>
 
         {/* 高级特性 */}
-        <div className="card p-6 mb-8">
+        <div className="pixel-area pixel-area-hover p-6 mb-8">
           <h2 className="section-title">
             <EmojiSVG emoji="🧠" size={14} /> 高级特性
           </h2>
@@ -202,7 +225,7 @@ export default function SettingsPage() {
             ] as const).map((item) => (
               <label
                 key={item.key}
-                className="flex items-center gap-3 p-3 rounded-lg border border-grid hover:border-ink/30 hover:bg-surface cursor-pointer transition-all"
+                className="flex items-center gap-3 p-3 border-2 border-[#e5e5e5] hover:border-ink/30 hover:bg-white cursor-pointer transition-all"
               >
                 <EmojiSVG emoji={item.emoji} size={20} />
                 <div className="flex-1">
@@ -213,7 +236,7 @@ export default function SettingsPage() {
                   type="checkbox"
                   checked={local[item.key]}
                   onChange={(e) => setLocal({ ...local, [item.key]: e.target.checked })}
-                  className="w-5 h-5 accent-ink rounded"
+                  className="w-5 h-5 accent-ink"
                 />
               </label>
             ))}

@@ -26,7 +26,6 @@ export default function DebatePage() {
   const [streamingAgent, setStreamingAgent] = useState("");
   const [vote, setVote] = useState<string>("");
   const decoderRef = useRef(new TextDecoder());
-  // 裁判评价状态 / Judge evaluation state
   const [judgeVote, setJudgeVote] = useState<{ proVotes: number; conVotes: number; drawVotes: number } | null>(null);
   const [judgeEval, setJudgeEval] = useState("");
   const [judging, setJudging] = useState(false);
@@ -102,9 +101,12 @@ export default function DebatePage() {
   const conRounds = roundsData.filter((r) => r.agent === agentB);
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      <div className="pixel-grid-bg" />
+      
+
       {/* 顶部导航 */}
-      <nav className="nav-bar">
+      <nav className="nav-bar relative z-10">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/" className="nav-link">← 返回首页</Link>
           <span className="nav-link nav-link-active flex items-center gap-1.5">
@@ -114,7 +116,7 @@ export default function DebatePage() {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto px-4 py-10">
+      <div className="relative z-10 max-w-4xl mx-auto px-4 py-10">
         {/* 页面标题 */}
         <div className="page-header">
           <p className="page-label">Debate Arena</p>
@@ -123,13 +125,13 @@ export default function DebatePage() {
         </div>
 
         {/* 配置区 */}
-        <div className="card-pixel p-6 mb-8">
+        <div className="pixel-area pixel-area-hover p-6 mb-8">
           <h2 className="section-title">
             <span>⚙️</span> 辩论配置
           </h2>
 
           <div className="mb-5">
-            <label className="pixel-text text-[10px] tracking-[0.1em] uppercase text-ink/50 block mb-2">辩论主题</label>
+            <label className="pixel-text text-[10px] tracking-[0.1em] uppercase text-muted block mb-2">辩论主题</label>
             <input
               type="text"
               value={topic}
@@ -169,8 +171,8 @@ export default function DebatePage() {
             </div>
           </div>
 
-          <div className="mb-5 bg-gray-50 rounded-xl p-4">
-            <label className="pixel-text text-[10px] tracking-[0.1em] uppercase text-ink/50 block mb-2">
+          <div className="mb-5 p-4 border-2 border-[#e5e5e5]">
+            <label className="pixel-text text-[10px] tracking-[0.1em] uppercase text-muted block mb-2">
               辩论轮次：<span className="text-ink font-bold">{rounds}</span>
             </label>
             <input
@@ -184,7 +186,7 @@ export default function DebatePage() {
             />
             <div className="flex justify-between mt-1.5">
               {[1, 2, 3, 4, 5].map((n) => (
-                <span key={n} className={`pixel-text text-[9px] ${n <= rounds ? "text-ink/60" : "text-ink/20"}`}>
+                <span key={n} className={`pixel-text text-[9px] ${n <= rounds ? "text-ink/60" : "text-muted"}`}>
                   {n}轮
                 </span>
               ))}
@@ -200,7 +202,7 @@ export default function DebatePage() {
               {debating ? "辩论中..." : "⚔️ 开始辩论"}
             </button>
             {!settings.apiKey && (
-              <span className="badge badge-outline text-danger/70 border-danger/30">
+              <span className="badge-pixel text-danger">
                 ⚠ 请先在设置页面配置 API Key
               </span>
             )}
@@ -211,10 +213,10 @@ export default function DebatePage() {
         {(roundsData.length > 0 || streamingText) && (
           <div className="grid grid-cols-2 gap-5 mb-8">
             {/* 正方 */}
-            <div className="card gradient-card-green p-5">
-              <h3 className="section-title !text-success/80 !border-success/60">
+            <div className="pixel-area pixel-area-hover p-5">
+              <h3 className="section-title">
                 <EmojiSVG emoji="✅" size={14} /> {agentA}
-                <span className="badge badge-outline ml-auto !text-success/60 !border-success/40">正方</span>
+                <span className="badge-pixel ml-auto">正方</span>
               </h3>
               <div className="space-y-4">
                 {proRounds.map((r, i) => (
@@ -223,7 +225,7 @@ export default function DebatePage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
-                    className="bg-white/70 rounded-xl p-4 border border-success/15"
+                    className="p-4 border-2 border-[#e5e5e5]"
                   >
                     <div className="pixel-text text-[9px] text-success/70 mb-2 font-semibold">
                       第 {r.round} 轮
@@ -235,7 +237,7 @@ export default function DebatePage() {
                 ))}
                 {proRounds.length === 0 && !streamingAgent && (
                   <div className="empty-state !py-6">
-                    <span className="empty-icon">📭</span>
+                    <span className="empty-icon">✦</span>
                     <p className="empty-title">等待正方发言</p>
                   </div>
                 )}
@@ -243,15 +245,15 @@ export default function DebatePage() {
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="bg-white/70 rounded-xl p-4 border border-success/30 shadow-sm"
+                    className="p-4 border-2 border-[#0f0f0f]"
                   >
                     <div className="pixel-text text-[9px] text-success/70 mb-2 font-semibold flex items-center gap-2">
-                      <span className="inline-block w-1.5 h-1.5 bg-success rounded-full animate-pulse" />
+                      <span className="inline-block w-1.5 h-1.5 bg-success animate-blink" />
                       进行中...
                     </div>
                     <p className="pixel-text text-xs text-ink/80 leading-relaxed whitespace-pre-wrap">
                       {streamingText}
-                      <span className="animate-pulse text-success">▋</span>
+                      <span className="animate-blink text-success">▋</span>
                     </p>
                   </motion.div>
                 )}
@@ -259,10 +261,10 @@ export default function DebatePage() {
             </div>
 
             {/* 反方 */}
-            <div className="card p-5" style={{ background: "linear-gradient(135deg, #fef2f2 0%, #fff1f2 100%)" }}>
-              <h3 className="section-title !text-danger/80 !border-danger/60">
+            <div className="pixel-area pixel-area-hover p-5">
+              <h3 className="section-title">
                 <EmojiSVG emoji="✕" size={14} /> {agentB}
-                <span className="badge badge-outline ml-auto !text-danger/60 !border-danger/40">反方</span>
+                <span className="badge-pixel ml-auto">反方</span>
               </h3>
               <div className="space-y-4">
                 {conRounds.map((r, i) => (
@@ -271,7 +273,7 @@ export default function DebatePage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
-                    className="bg-white/70 rounded-xl p-4 border border-danger/15"
+                    className="p-4 border-2 border-[#e5e5e5]"
                   >
                     <div className="pixel-text text-[9px] text-danger/70 mb-2 font-semibold">
                       第 {r.round} 轮
@@ -283,7 +285,7 @@ export default function DebatePage() {
                 ))}
                 {conRounds.length === 0 && !streamingAgent && (
                   <div className="empty-state !py-6">
-                    <span className="empty-icon">📭</span>
+                    <span className="empty-icon">✦</span>
                     <p className="empty-title">等待反方发言</p>
                   </div>
                 )}
@@ -291,15 +293,15 @@ export default function DebatePage() {
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="bg-white/70 rounded-xl p-4 border border-danger/30 shadow-sm"
+                    className="p-4 border-2 border-[#0f0f0f]"
                   >
                     <div className="pixel-text text-[9px] text-danger/70 mb-2 font-semibold flex items-center gap-2">
-                      <span className="inline-block w-1.5 h-1.5 bg-danger rounded-full animate-pulse" />
+                      <span className="inline-block w-1.5 h-1.5 bg-danger animate-blink" />
                       进行中...
                     </div>
                     <p className="pixel-text text-xs text-ink/80 leading-relaxed whitespace-pre-wrap">
                       {streamingText}
-                      <span className="animate-pulse text-danger">▋</span>
+                      <span className="animate-blink text-danger">▋</span>
                     </p>
                   </motion.div>
                 )}
@@ -310,20 +312,20 @@ export default function DebatePage() {
 
         {/* 辩论中加载状态 */}
         {debating && roundsData.length === 0 && !streamingText && (
-          <div className="card-pixel p-10 mb-8 text-center">
+          <div className="pixel-area p-10 mb-8 text-center">
             <div className="flex items-center justify-center gap-2 mb-4">
               {[0, 1, 2].map((i) => (
                 <motion.div
                   key={i}
                   animate={{ y: [0, -10, 0] }}
                   transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                  className="w-3 h-3 rounded-sm bg-ink/60"
+                  className="w-3 h-3 bg-ink/60"
                 />
               ))}
             </div>
-            <p className="pixel-text text-sm text-ink/60">AI 辩手正在准备辩论...</p>
+            <p className="pixel-text text-sm text-muted">AI 辩手正在准备辩论...</p>
             <div className="mt-6 max-w-xs mx-auto">
-              <div className="progress-bar animate-shimmer" />
+              <div className="progress-bar" />
             </div>
           </div>
         )}
@@ -334,7 +336,7 @@ export default function DebatePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="card-pixel p-6 mb-8 text-center"
+            className="pixel-area-elevated p-6 mb-8 text-center"
           >
             <h3 className="section-title !justify-center">
               <span>🗳️</span> 辩论结束 — 你认为谁赢了？
@@ -363,9 +365,9 @@ export default function DebatePage() {
               <motion.p
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="pixel-text text-xs text-ink/60 mt-5"
+                className="pixel-text text-xs text-muted mt-5"
               >
-                你已投票：<span className="font-bold text-ink">{vote}</span> 🎉
+                你已投票：<span className="font-bold text-ink">{vote}</span>
               </motion.p>
             )}
           </motion.div>
@@ -377,13 +379,13 @@ export default function DebatePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
-            className="card-pixel p-6 mb-8"
+            className="pixel-area pixel-area-hover p-6 mb-8"
           >
             <h3 className="section-title">
               <span>🏛️</span> 裁判评价 & 100人模拟投票
               {judging && (
-                <span className="badge badge-outline ml-auto !text-warning/80 !border-warning/40">
-                  <span className="inline-block w-1.5 h-1.5 bg-warning rounded-full animate-pulse mr-1.5" />
+                <span className="badge-pixel ml-auto">
+                  <span className="inline-block w-1.5 h-1.5 bg-warning animate-blink mr-1.5" />
                   评判中...
                 </span>
               )}
@@ -391,56 +393,53 @@ export default function DebatePage() {
 
             {/* 100人投票结果条形图 */}
             {judgeVote && (
-              <div className="mb-6 p-5 rounded-xl gradient-card-amber border border-warning/20">
+              <div className="mb-6 p-5 pixel-area">
                 <h4 className="pixel-text text-[10px] tracking-[0.1em] uppercase text-warning/80 mb-4 font-semibold">
                   📊 100 位观众立场投票
                 </h4>
                 <div className="space-y-3">
-                  {/* 正方票数 */}
                   <div className="flex items-center gap-3">
                     <span className="pixel-text text-[10px] text-success font-semibold w-20 text-right shrink-0">
                       {agentA}
                     </span>
-                    <div className="flex-1 h-6 bg-white/80 rounded-full overflow-hidden border border-success/30 shadow-inner">
+                    <div className="flex-1 h-6 border-2 border-[#e5e5e5] overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${judgeVote.proVotes}%` }}
                         transition={{ duration: 0.8, ease: "easeOut" }}
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-green-500"
+                        className="h-full bg-success"
                       />
                     </div>
                     <span className="pixel-text text-[11px] text-ink/80 w-12 text-right font-bold">
                       {judgeVote.proVotes}票
                     </span>
                   </div>
-                  {/* 反方票数 */}
                   <div className="flex items-center gap-3">
                     <span className="pixel-text text-[10px] text-danger font-semibold w-20 text-right shrink-0">
                       {agentB}
                     </span>
-                    <div className="flex-1 h-6 bg-white/80 rounded-full overflow-hidden border border-danger/30 shadow-inner">
+                    <div className="flex-1 h-6 border-2 border-[#e5e5e5] overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${judgeVote.conVotes}%` }}
                         transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
-                        className="h-full rounded-full bg-gradient-to-r from-red-400 to-rose-500"
+                        className="h-full bg-danger"
                       />
                     </div>
                     <span className="pixel-text text-[11px] text-ink/80 w-12 text-right font-bold">
                       {judgeVote.conVotes}票
                     </span>
                   </div>
-                  {/* 平局票数 */}
                   <div className="flex items-center gap-3">
-                    <span className="pixel-text text-[10px] text-ink/50 font-semibold w-20 text-right shrink-0">
+                    <span className="pixel-text text-[10px] text-muted font-semibold w-20 text-right shrink-0">
                       🤝 平局
                     </span>
-                    <div className="flex-1 h-6 bg-white/80 rounded-full overflow-hidden border border-ink/15 shadow-inner">
+                    <div className="flex-1 h-6 border-2 border-[#e5e5e5] overflow-hidden">
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${judgeVote.drawVotes}%` }}
                         transition={{ duration: 0.8, ease: "easeOut", delay: 0.4 }}
-                        className="h-full rounded-full bg-gradient-to-r from-gray-300 to-gray-400"
+                        className="h-full bg-ink/30"
                       />
                     </div>
                     <span className="pixel-text text-[11px] text-ink/80 w-12 text-right font-bold">
@@ -448,7 +447,7 @@ export default function DebatePage() {
                     </span>
                   </div>
                 </div>
-                <p className="pixel-text text-[9px] text-ink/35 mt-4 text-center">
+                <p className="pixel-text text-[9px] text-muted mt-4 text-center">
                   以上为 AI 裁判模拟 100 位观众的投票结果
                 </p>
               </div>
@@ -456,8 +455,8 @@ export default function DebatePage() {
 
             {/* 裁判评价文字 */}
             {judgeEval && (
-              <div className="p-5 rounded-xl bg-white border border-ink/10">
-                <h4 className="pixel-text text-[10px] tracking-[0.1em] uppercase text-ink/60 mb-3 font-semibold">
+              <div className="p-5 pixel-area">
+                <h4 className="pixel-text text-[10px] tracking-[0.1em] uppercase text-muted mb-3 font-semibold">
                   📝 裁判评语
                 </h4>
                 <div className="pixel-text text-xs text-ink/75 leading-relaxed whitespace-pre-wrap">
@@ -475,13 +474,13 @@ export default function DebatePage() {
                       key={i}
                       animate={{ y: [0, -10, 0] }}
                       transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                      className="w-3 h-3 rounded-sm bg-warning"
+                      className="w-3 h-3 bg-warning"
                     />
                   ))}
                 </div>
                 <p className="pixel-text text-sm text-warning/70">AI 裁判正在评判中...</p>
                 <div className="mt-5 max-w-xs mx-auto">
-                  <div className="progress-bar animate-shimmer" />
+                  <div className="progress-bar" />
                 </div>
               </div>
             )}

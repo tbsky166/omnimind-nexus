@@ -203,8 +203,8 @@ export function evolvePersonality(
 
   // 应用变化
   for (const [key, value] of Object.entries(delta)) {
-    (personality.traits as Record<string, number>)[key] = Math.round(
-      Math.max(0, Math.min(100, (personality.traits as Record<string, number>)[key] + value))
+    (personality.traits as unknown as Record<string, number>)[key] = Math.round(
+      Math.max(0, Math.min(100, (personality.traits as unknown as Record<string, number>)[key] + value))
     );
   }
 

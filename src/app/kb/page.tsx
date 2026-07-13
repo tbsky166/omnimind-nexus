@@ -153,7 +153,9 @@ export default function KnowledgeBasePage() {
   };
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      <div className="pixel-grid-bg" />
+      
       {/* 顶部导航 */}
       <nav className="nav-bar">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -174,7 +176,7 @@ export default function KnowledgeBasePage() {
         </div>
 
         {/* 上传区域 */}
-        <div className="card p-6 mb-6">
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
             <EmojiSVG emoji="📤" size={14} /> 上传文档
           </h2>
@@ -211,7 +213,7 @@ export default function KnowledgeBasePage() {
         </div>
 
         {/* 文档列表 */}
-        <div className="card p-6 mb-6">
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
             <EmojiSVG emoji="📦" size={14} /> 知识库文档 ({docs.length})
           </h2>
@@ -219,7 +221,7 @@ export default function KnowledgeBasePage() {
             <p className="pixel-text text-sm text-ink/30 py-4">加载中...</p>
           ) : docs.length === 0 ? (
             <div className="empty-state">
-              <EmojiSVG emoji="📭" size={40} />
+              <span className="empty-icon">✦</span>
               <p className="empty-title">暂无文档</p>
               <p className="empty-desc">上传文本内容来建立知识库</p>
             </div>
@@ -231,7 +233,7 @@ export default function KnowledgeBasePage() {
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.03 }}
-                  className="card-pixel flex items-center gap-3 p-4"
+                  className="pixel-area pixel-area-hover flex items-center gap-3 p-4"
                 >
                   <EmojiSVG emoji="📄" size={20} />
                   <div className="flex-1 min-w-0">
@@ -248,7 +250,7 @@ export default function KnowledgeBasePage() {
         </div>
 
         {/* 问答区域 */}
-        <div className="card p-6">
+        <div className="pixel-area pixel-area-hover p-6">
           <h2 className="section-title">
             <EmojiSVG emoji="❓" size={14} /> 提问
           </h2>
@@ -278,13 +280,13 @@ export default function KnowledgeBasePage() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="mb-4 p-4 rounded-lg border border-grid bg-surface"
+                className="mb-4 p-4 border-2 border-[#e5e5e5] bg-white"
               >
                 <p className="pixel-text text-[10px] text-ink/40 mb-3 uppercase tracking-[0.1em]">检索来源</p>
                 <div className="space-y-2">
                   {sources.map((src, i) => (
                     <div key={i} className="flex items-center gap-2">
-                      <span className="badge badge-outline">#{i + 1}</span>
+                      <span className="badge-pixel">#{i + 1}</span>
                       <span className="pixel-text text-[10px] text-ink/60 flex-1 truncate">{src.title}</span>
                       <span className="pixel-text text-[9px] text-ink/40">{(src.score * 100).toFixed(1)}%</span>
                       <div className="progress-bar w-20">
@@ -303,7 +305,7 @@ export default function KnowledgeBasePage() {
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="card-pixel p-5"
+                className="pixel-area p-5"
               >
                 <p className="pixel-text text-xs text-ink/80 leading-relaxed whitespace-pre-wrap">
                   {answer}

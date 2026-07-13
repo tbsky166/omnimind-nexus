@@ -17,6 +17,8 @@ export interface AppSettings {
   embeddingApiKey: string;
   embeddingBaseUrl: string;
   embeddingModel: string;
+  // Tavily 联网搜索 / Tavily web search
+  tavilyApiKey: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -32,6 +34,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   embeddingApiKey: "",
   embeddingBaseUrl: "https://api.openai.com/v1",
   embeddingModel: "text-embedding-3-small",
+  tavilyApiKey: "",
 };
 
 const STORAGE_KEY = "omnimind-settings";

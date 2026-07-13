@@ -313,6 +313,100 @@ export function executeCodebaseList(
   }
 }
 
+/** 代码库文件编辑 — 通过精确字符串替换修改项目源文件 / Codebase file edit — modify project source files via exact string replacement */
+export function executeCodebaseEdit(
+  filePath: string,
+  oldString: string,
+  newString: string,
+  cwd: string,
+): { success: boolean; filePath: string; message: string; linesChanged: number } {
+  const safePath = filePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/");
+
+  if (isPathBlacklisted(safePath)) {
+    return {
+      success: false,
+      filePath: safePath,
+      message: `拒绝访问：${safePath} 属于受保护文件/目录，不允许编辑。`,
+      linesChanged: 0,
+    };
+  }
+
+  const fullPath = path.join(cwd, safePath);
+
+  if (!fullPath.startsWith(cwd)) {
+    return {
+      success: false,
+      filePath: safePath,
+      message: `拒绝访问：路径越界，只允许编辑项目目录内的文件。`,
+      linesChanged: 0,
+    };
+  }
+
+  if (!fs.existsSync(fullPath)) {
+    return {
+      success: false,
+      filePath: safePath,
+      message: `文件不存在：${safePath}，请先使用 codebase_read 读取文件内容。`,
+      linesChanged: 0,
+    };
+  }
+
+  const stat = fs.statSync(fullPath);
+  if (stat.isDirectory()) {
+    return {
+      success: false,
+      filePath: safePath,
+      message: `${safePath} 是一个目录，无法编辑。`,
+      linesChanged: 0,
+    };
+  }
+
+  try {
+    const content = fs.readFileSync(fullPath, "utf-8");
+
+    if (!content.includes(oldString)) {
+      return {
+        success: false,
+        filePath: safePath,
+        message: `未找到匹配的文本：old_string 在文件中不存在。请使用 codebase_read 确认文件内容后重试。`,
+        linesChanged: 0,
+      };
+    }
+
+    // 检查 old_string 是否唯一
+    const occurrences = content.split(oldString).length - 1;
+    if (occurrences > 1) {
+      return {
+        success: false,
+        filePath: safePath,
+        message: `old_string 在文件中出现了 ${occurrences} 次，不够唯一。请提供更多上下文使匹配唯一。`,
+        linesChanged: 0,
+      };
+    }
+
+    const newContent = content.replace(oldString, newString);
+    const oldLines = content.split("\n").length;
+    const newLines = newContent.split("\n").length;
+    const linesChanged = newLines - oldLines;
+
+    fs.writeFileSync(fullPath, newContent, "utf-8");
+
+    return {
+      success: true,
+      filePath: safePath,
+      message: `编辑成功：${safePath}（${linesChanged > 0 ? `+${linesChanged}` : linesChanged} 行）`,
+      linesChanged,
+    };
+  } catch (e) {
+    return {
+      success: false,
+      filePath: safePath,
+      message: `编辑失败: ${e instanceof Error ? e.message : "Unknown"}`,
+      linesChanged: 0,
+    };
+  }
+}
+
 // ---- DOCX 生成器 / DOCX Generator ----
 // 将 Markdown 风格的内容转换为 DOCX 格式的 Buffer，支持标题、代码块、粗体等 / Convert Markdown-style content to DOCX format Buffer, supporting headings, code blocks, bold text, etc.
 export async function generateDocxBuffer(content: string, title: string): Promise<Buffer> {

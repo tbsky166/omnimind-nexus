@@ -21,18 +21,16 @@ import { parseAgentDSL, serializeDSL } from "@/lib/agent-dsl";
 import { generateAgentPackage, generateAgentRegistry } from "@/lib/agent-factory";
 import { generateFullExtension } from "@/lib/nextjs-builder";
 import { findTemplate } from "@/data/agent-templates";
-import { executeGenerateDocument, executeFileWrite, executeFileRead, executeCodebaseRead, executeCodebaseList } from "@/lib/document";
+import { executeGenerateDocument, executeFileWrite, executeFileRead, executeCodebaseRead, executeCodebaseList, executeCodebaseEdit } from "@/lib/document";
 import { agents } from "@/data/agents";
-import { createKnowledgeGraph, addEntity, addRelation, queryGraph, applyForgettingCurve, generateGraphSummary, type KnowledgeGraph } from "@/lib/knowledge-graph";
-import { createMetacognitionManager, startThinking, recordThinking, endThinking, formatReflectionReport, type MetacognitionState } from "@/lib/metacognition";
+import { addEntity, addRelation, applyForgettingCurve, generateGraphSummary } from "@/lib/knowledge-graph";
+import { globalKnowledgeGraph, lastForgettingCurve } from "@/lib/kg-store";
+import { createMetacognitionManager, startThinking, recordThinking, endThinking, formatReflectionReport } from "@/lib/metacognition";
 import { runSwarmConsensus, createSwarmMemory, type SwarmConfig } from "@/lib/swarm";
+import { runEvolution, initializePopulation, type EvolutionConfig, type EvolutionResult } from "@/lib/evolution";
 import { calculateDiversity, type DiversityMetrics } from "@/lib/diversity";
 import { analyzeCounterfactual, saveCounterfactualAnalysis } from "@/lib/counterfactual";
 import { addMemory } from "@/lib/dreams";
-
-// ── 全局共享状态：知识图谱跨会话持久化 / Global shared state: knowledge graph persists across sessions ──
-const globalKnowledgeGraph: KnowledgeGraph = createKnowledgeGraph();
-let lastForgettingCurve = Date.now();
 
 // ── 全局元认知状态：追踪所有 Agent 的思维过程 / Global metacognition state: track all agents' thinking processes ──
 const globalMetacognition = createMetacognitionManager({
@@ -45,6 +43,9 @@ const globalMetacognition = createMetacognitionManager({
   biasSeverityThreshold: 0.4,
   maxThinkingChainLength: 50,
 });
+
+// ── 模块级 tavilyApiKey（从 POST handler 设置，供 toolExecutor 使用）/ Module-level tavilyApiKey (set by POST handler, used by toolExecutor) ──
+let currentTavilyApiKey: string | undefined;
 
 export const runtime = "nodejs";
 
@@ -235,19 +236,34 @@ async function toolExecutor(name: string, args: Record<string, unknown>): Promis
     });
   }
 
+  if (name === "codebase_edit") {
+    const result = executeCodebaseEdit(
+      (args.path as string) || "",
+      (args.old_string as string) || "",
+      (args.new_string as string) || "",
+      process.cwd()
+    );
+    return JSON.stringify({
+      success: result.success,
+      tool: "codebase_edit",
+      filePath: result.filePath,
+      message: result.message,
+      linesChanged: result.linesChanged,
+    });
+  }
+
   if (name === "web_search") {
     const { webSearch, formatSearchResults } = await import("@/lib/search");
     const query = (args.query as string) || "";
     if (!query.trim()) {
       return JSON.stringify({ success: false, error: "搜索关键词不能为空" });
     }
-    const result = await webSearch(query);
+    const result = await webSearch(query, currentTavilyApiKey);
     return JSON.stringify({
       success: true,
       tool: "web_search",
       query: result.query,
       answer: result.answer,
-      abstract: result.abstract,
       results: result.results.slice(0, 5),
       formatted: formatSearchResults(result),
       searchTime: result.searchTime,
@@ -295,6 +311,16 @@ async function sendToolCard(
         fileUrl: parsed.fileUrl,
         downloadName: parsed.fileName,
         fileFormat: parsed.fileName?.split(".").pop() || "txt",
+      };
+      await writeSSE(controller, encoder, msg);
+    } else if (parsed.tool === "codebase_edit") {
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: agentEmoji,
+        content: `编辑 ${parsed.filePath}（${parsed.linesChanged > 0 ? `+${parsed.linesChanged}` : parsed.linesChanged} 行）`,
+        a2aLayer,
+        toolName: "codebase_edit",
+        toolAction: "编辑源码",
       };
       await writeSSE(controller, encoder, msg);
     }
@@ -373,6 +399,15 @@ export async function POST(req: NextRequest) {
     const baseUrl = clientSettings?.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
     const model = clientSettings?.model || process.env.OPENAI_MODEL || "gpt-4o";
 
+    // 功能开关 / Feature toggles
+    const enableSwarm = clientSettings?.enableSwarm ?? true;
+    const enableEvolution = clientSettings?.enableEvolution ?? false;
+    const enableKnowledgeGraph = clientSettings?.enableKnowledgeGraph ?? true;
+    const enableMetacognition = clientSettings?.enableMetacognition ?? true;
+
+    // 设置模块级变量供 toolExecutor 使用 / Set module-level variable for toolExecutor
+    currentTavilyApiKey = clientSettings?.tavilyApiKey;
+
     if (!apiKey) {
       return Response.json({ error: "API Key 未配置，请前往设置页面填写" }, { status: 500 });
     }
@@ -434,9 +469,9 @@ export async function POST(req: NextRequest) {
           history.push(creditMsg);
           await writeSSE(controller, encoder, creditMsg);
 
-          // ── 蜂群模式检测：检测用户是否请求蜂群共识 / Swarm mode detection: check if user requests swarm consensus ──
+          // ── 蜂群模式检测：仅在开关启用且触发关键词时激活 / Swarm mode: only when toggle enabled and keywords match ──
           const swarmKeywords = /(蜂群|swarm|共识|consensus|集体决策|投票|群体智能|信息素|蚂蚁|ant colony|粒子群|pso)/i;
-          const isSwarmMode = swarmKeywords.test(message);
+          const isSwarmMode = enableSwarm && swarmKeywords.test(message);
           if (isSwarmMode) {
             const swarmNotice: AgentMessage = {
               speaker: "Swarm Engine", emoji: "🐝",
@@ -484,18 +519,22 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
             await writeSSE(controller, encoder, swarmResult);
           }
 
-          // ── 知识图谱：应用遗忘曲线 / Knowledge graph: apply forgetting curve ──
-          const now = Date.now();
-          if (now - lastForgettingCurve > 3600000) { // 每小时一次 / Once per hour
+          // ── 知识图谱：应用遗忘曲线（仅在开关启用时）/ Knowledge graph: apply forgetting curve (only when enabled) ──
+          if (enableKnowledgeGraph) {
+            const now = Date.now();
+            if (now - lastForgettingCurve.value > 3600000) {
             applyForgettingCurve(globalKnowledgeGraph, 7 * 24 * 3600 * 1000);
-            lastForgettingCurve = now;
+            lastForgettingCurve.value = now;
+            }
           }
 
-          // ── 元认知：为每个 Agent 开始思维链 / Metacognition: start thinking chain for each agent ──
-          for (const agentName of selectedAgents) {
-            const agentData = agents.find((a) => a.name === agentName);
-            if (agentData) {
-              startThinking(globalMetacognition, `session_${Date.now()}`, agentName, agentName, message);
+          // ── 元认知：为每个 Agent 开始思维链（仅在开关启用时）/ Metacognition: start thinking chain (only when enabled) ──
+          if (enableMetacognition) {
+            for (const agentName of selectedAgents) {
+              const agentData = agents.find((a) => a.name === agentName);
+              if (agentData) {
+                startThinking(globalMetacognition, `session_${Date.now()}`, agentName, agentName, message);
+              }
             }
           }
 
@@ -538,7 +577,8 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
                 await sendToolCard(controller, encoder, agentName, agentEmoji, "L4", tr.name, tr.result);
               }
 
-              // ── 知识图谱：从 Agent 响应中提取关键概念 / Extract key concepts from agent response ──
+              // ── 知识图谱：从 Agent 响应中提取关键概念（仅在开关启用时）/ Extract key concepts (only when enabled) ──
+              if (enableKnowledgeGraph) {
               const entityMatches = content.match(/(?:`[^`]+`)|(?:\b(?:API|SDK|CLI|REST|GraphQL|gRPC|WebSocket|HTTP|HTTPS|TCP|TLS|SSL|OAuth|JWT|SSO|React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Nest|Django|Flask|FastAPI|Rails|Laravel|Spring|Gin|PostgreSQL|MySQL|MongoDB|Redis|Elasticsearch|Docker|Kubernetes|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Terraform|微服务|容器化|服务网格|事件驱动|领域驱动|CQRS|Machine Learning|Deep Learning|NLP|LLM|RAG|Vector DB|Embedding|机器学习|深度学习|自然语言处理|大语言模型|检索增强|Transformer|GAN|RL|神经网络|注意力机制|强化学习)\b)/gi);
               if (entityMatches) {
                 const uniqueEntities = [...new Set(entityMatches.map((e) => e.replace(/`/g, "").trim()).filter((e) => e.length > 1 && e.length < 50))];
@@ -581,8 +621,10 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
                   }
                 }
               }
+              } // end enableKnowledgeGraph
 
-              // ── 元认知：记录思维步骤 / Record thinking step ──
+              // ── 元认知：记录思维步骤（仅在开关启用时）/ Record thinking step (only when enabled) ──
+              if (enableMetacognition) {
               recordThinking(globalMetacognition, {
                 type: "analysis",
                 content: content.slice(0, 300),
@@ -594,6 +636,7 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
                 alternatives: [],
                 biases: [],
               });
+              } // end enableMetacognition
             } catch (e) {
               const errMsg: AgentMessage = {
                 speaker: agentName, emoji: agentEmoji,
@@ -651,6 +694,69 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           // ═══ 记忆巩固 / Memory consolidation ═══
           for (const msg of l4Outputs) {
             addMemory(msg.agentName, `session_${Date.now()}`, msg.content, "insight", 60);
+          }
+
+          // ═══ 基因进化：基于本轮表现优化 Agent 参数（仅在开关启用时）/ Genetic evolution: optimize agent params (only when enabled) ═══
+          if (enableEvolution && l4Outputs.length >= 2) {
+            const evoNotice: AgentMessage = {
+              speaker: "Evolution Engine", emoji: "🧬",
+              content: "启动基因进化引擎，基于本轮 Agent 表现进行遗传算法优化...",
+              a2aLayer: "Evolution", isSystem: true,
+            };
+            history.push(evoNotice);
+            await writeSSE(controller, encoder, evoNotice);
+
+            try {
+              const evoConfig: EvolutionConfig = {
+                populationSize: 20,
+                eliteCount: 4,
+                crossoverRate: 0.7,
+                mutationRate: 0.2,
+                tournamentSize: 3,
+                maxGenerations: 10,
+                targetFitness: 0.95,
+                stagnationLimit: 5,
+              };
+
+              const evoResult = await runEvolution(
+                evoConfig,
+                async (chromosome) => {
+                  // 适应度 = 基于多样性和 Agent 表现的综合评分
+                  const params = chromosome.genes.reduce((acc, g) => {
+                    acc[g.name] = g.value;
+                    return acc;
+                  }, {} as Record<string, number>);
+                  const creativityBonus = (params.creativity ?? 0.5) * 0.3;
+                  const rigorBonus = (1 - (params.risk_tolerance ?? 0.5)) * 0.3;
+                  const diversityBonus = Math.min(1, diversityScore / 100) * 0.4;
+                  return creativityBonus + rigorBonus + diversityBonus;
+                },
+              );
+
+              const bestGenes = evoResult.bestChromosome.genes
+                .slice(0, 5)
+                .map((g) => `${g.name}: ${g.value.toFixed(2)}`);
+              const evoResultMsg: AgentMessage = {
+                speaker: "Evolution Engine", emoji: "🧬",
+                content: `基因进化完成：
+• 代数：${evoResult.totalGenerations}
+• 最佳适应度：${evoResult.bestChromosome.fitness.toFixed(4)}
+• 收敛原因：${evoResult.convergenceReason === "target_reached" ? "达到目标" : evoResult.convergenceReason === "stagnation" ? "进化停滞" : "达到最大代数"}
+• 优化参数：${bestGenes.join("、")}
+• 进化时间：${(evoResult.totalTime / 1000).toFixed(1)}s`,
+                a2aLayer: "Evolution", isSystem: true,
+              };
+              history.push(evoResultMsg);
+              await writeSSE(controller, encoder, evoResultMsg);
+            } catch (evoErr) {
+              const evoErrMsg: AgentMessage = {
+                speaker: "Evolution Engine", emoji: "🧬",
+                content: `基因进化跳过：${evoErr instanceof Error ? evoErr.message : "未知错误"}`,
+                a2aLayer: "Evolution", isSystem: true,
+              };
+              history.push(evoErrMsg);
+              await writeSSE(controller, encoder, evoErrMsg);
+            }
           }
 
           // ═══ Agent 创建后处理 / Agent creation post-processing ═══
@@ -779,20 +885,22 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
             }
           }
 
-          // ── 元认知：结束所有 Agent 的思维链并生成反思 / End thinking chains and generate reflections ──
+          // ── 元认知：结束所有 Agent 的思维链并生成反思（仅在开关启用时）/ End thinking chains (only when enabled) ──
           const reflectionReports: string[] = [];
-          for (const agentName of selectedAgents) {
-            const chain = endThinking(globalMetacognition, "多轮讨论完成", 0.8);
-            if (chain && globalMetacognition.reports.length > 0) {
-              const latestReport = globalMetacognition.reports[globalMetacognition.reports.length - 1];
-              if (latestReport.agentId === agentName) {
-                reflectionReports.push(formatReflectionReport(latestReport));
+          if (enableMetacognition) {
+            for (const agentName of selectedAgents) {
+              const chain = endThinking(globalMetacognition, "多轮讨论完成", 0.8);
+              if (chain && globalMetacognition.reports.length > 0) {
+                const latestReport = globalMetacognition.reports[globalMetacognition.reports.length - 1];
+                if (latestReport.agentId === agentName) {
+                  reflectionReports.push(formatReflectionReport(latestReport));
+                }
               }
             }
           }
 
-          // ── 知识图谱摘要 / Knowledge graph summary ──
-          const kgSummary = generateGraphSummary(globalKnowledgeGraph);
+          // ── 知识图谱摘要（仅在开关启用时）/ Knowledge graph summary (only when enabled) ──
+          const kgSummary = enableKnowledgeGraph ? generateGraphSummary(globalKnowledgeGraph) : "";
 
           // ═══ 第五阶段：L6 仲裁 — 综合各 Agent 意见，输出最终结论（≥2 Agent 时触发） / Phase 5: L6 Arbitration ═══
           if (selectedAgents.length >= 2) {
@@ -852,8 +960,8 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           history.push(memMsg);
           await writeSSE(controller, encoder, memMsg);
 
-          // ── 知识图谱洞察：发送知识图谱统计 / Knowledge graph insights: send graph statistics ──
-          if (globalKnowledgeGraph.entities.size > 0) {
+          // ── 知识图谱洞察：发送知识图谱统计（仅在开关启用时）/ Knowledge graph insights (only when enabled) ──
+          if (enableKnowledgeGraph && globalKnowledgeGraph.entities.size > 0) {
             const entityArray = Array.from(globalKnowledgeGraph.entities.values());
             const sortedByAccess = entityArray.sort((a, b) => b.accessCount - a.accessCount);
             const recentEntities = sortedByAccess.slice(0, 5);
@@ -871,8 +979,8 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
             await writeSSE(controller, encoder, kgMsg);
           }
 
-          // ── 元认知反思摘要 / Metacognition reflection summary ──
-          if (reflectionReports.length > 0) {
+          // ── 元认知反思摘要（仅在开关启用时）/ Metacognition reflection summary (only when enabled) ──
+          if (enableMetacognition && reflectionReports.length > 0) {
             const metaMsg: AgentMessage = {
               speaker: "Metacognition", emoji: "🪞",
               content: `元认知反思完成：已为 ${reflectionReports.length} 个 Agent 生成反思报告。认知偏差检测、置信度校准、改进建议已生成。`,

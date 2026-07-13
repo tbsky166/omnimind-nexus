@@ -29,9 +29,13 @@ export default function DashboardPage() {
   const maxUsage = stats?.agentUsage?.[0]?.count || 1;
 
   return (
-    <main className="relative min-h-screen bg-surface">
+    <main className="relative min-h-screen bg-white">
+      {/* 像素网格背景 */}
+      <div className="pixel-grid-bg" />
+      
+
       {/* 顶部导航 */}
-      <nav className="nav-bar">
+      <nav className="nav-bar relative z-10">
         <div className="max-w-4xl mx-auto px-6 py-3 flex items-center justify-between">
           <Link href="/" className="nav-link">
             ← 返回
@@ -43,7 +47,7 @@ export default function DashboardPage() {
         </div>
       </nav>
 
-      <div className="max-w-4xl mx-auto px-6 py-10">
+      <div className="relative z-10 max-w-4xl mx-auto px-6 py-10">
         {/* 页面标题 */}
         <div className="page-header">
           <p className="page-label">数据统计</p>
@@ -53,13 +57,13 @@ export default function DashboardPage() {
 
         {loading ? (
           <div className="empty-state">
-            <div className="empty-icon">⏳</div>
+            <div className="empty-icon">✦</div>
             <p className="empty-title">加载中...</p>
             <p className="empty-desc">正在获取统计数据</p>
           </div>
         ) : !stats ? (
           <div className="empty-state">
-            <div className="empty-icon">⚠️</div>
+            <div className="empty-icon">✦</div>
             <p className="empty-title">无法加载统计数据</p>
             <p className="empty-desc">请稍后刷新页面重试</p>
           </div>
@@ -67,44 +71,44 @@ export default function DashboardPage() {
           <>
             {/* 数字卡片 */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-              <div className="stat-card animate-fade-in-up" style={{ animationDelay: "0ms" }}>
+              <div className="pixel-area-elevated p-4 animate-fade-in-up" style={{ animationDelay: "0ms" }}>
                 <div className="flex items-center gap-2 mb-2">
                   <EmojiSVG emoji="💬" size={14} />
-                  <span className="stat-label">会话总数</span>
+                  <span className="pixel-text text-[0.5625rem] text-muted uppercase tracking-[0.1em]">会话总数</span>
                 </div>
-                <div className="stat-value">{stats.sessions.total}</div>
+                <div className="pixel-text text-2xl font-bold text-ink">{stats.sessions.total}</div>
               </div>
-              <div className="stat-card animate-fade-in-up" style={{ animationDelay: "50ms" }}>
+              <div className="pixel-area-elevated p-4 animate-fade-in-up" style={{ animationDelay: "50ms" }}>
                 <div className="flex items-center gap-2 mb-2">
                   <EmojiSVG emoji="🤖" size={14} />
-                  <span className="stat-label">Agent 总数</span>
+                  <span className="pixel-text text-[0.5625rem] text-muted uppercase tracking-[0.1em]">Agent 总数</span>
                 </div>
-                <div className="stat-value">{stats.totalAgents}</div>
+                <div className="pixel-text text-2xl font-bold text-ink">{stats.totalAgents}</div>
               </div>
-              <div className="stat-card animate-fade-in-up" style={{ animationDelay: "100ms" }}>
+              <div className="pixel-area-elevated p-4 animate-fade-in-up" style={{ animationDelay: "100ms" }}>
                 <div className="flex items-center gap-2 mb-2">
                   <EmojiSVG emoji="📦" size={14} />
-                  <span className="stat-label">工作区文件</span>
+                  <span className="pixel-text text-[0.5625rem] text-muted uppercase tracking-[0.1em]">工作区文件</span>
                 </div>
-                <div className="stat-value">{stats.workspaceFiles}</div>
+                <div className="pixel-text text-2xl font-bold text-ink">{stats.workspaceFiles}</div>
               </div>
-              <div className="stat-card animate-fade-in-up" style={{ animationDelay: "150ms" }}>
+              <div className="pixel-area-elevated p-4 animate-fade-in-up" style={{ animationDelay: "150ms" }}>
                 <div className="flex items-center gap-2 mb-2">
                   <EmojiSVG emoji="📊" size={14} />
-                  <span className="stat-label">消息总数</span>
+                  <span className="pixel-text text-[0.5625rem] text-muted uppercase tracking-[0.1em]">消息总数</span>
                 </div>
-                <div className="stat-value">{stats.sessions.recent.reduce((s, r) => s + r.messageCount, 0)}</div>
+                <div className="pixel-text text-2xl font-bold text-ink">{stats.sessions.recent.reduce((s, r) => s + r.messageCount, 0)}</div>
               </div>
             </div>
 
             {/* Agent 使用频率 */}
-            <section className="card p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "200ms" }}>
+            <section className="pixel-area pixel-area-hover p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "200ms" }}>
               <h2 className="section-title">
                 <EmojiSVG emoji="🤖" size={14} /> Agent 使用频率
               </h2>
               {stats.agentUsage.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-icon">🤖</div>
+                  <div className="empty-icon">✦</div>
                   <p className="empty-title">暂无数据</p>
                   <p className="empty-desc">Agent 协作后会显示使用频率统计</p>
                 </div>
@@ -116,7 +120,7 @@ export default function DashboardPage() {
                       <span className="pixel-text text-xs text-ink w-36 truncate">{agent.name}</span>
                       <div className="flex-1 progress-bar">
                         <div
-                          className="progress-bar-fill bg-ink"
+                          className="progress-bar-fill"
                           style={{ width: `${(agent.count / maxUsage) * 100}%` }}
                         />
                       </div>
@@ -128,13 +132,13 @@ export default function DashboardPage() {
             </section>
 
             {/* 最近会话 */}
-            <section className="card p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "250ms" }}>
+            <section className="pixel-area pixel-area-hover p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "250ms" }}>
               <h2 className="section-title">
                 <EmojiSVG emoji="🕐" size={14} /> 最近会话
               </h2>
               {stats.sessions.recent.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-icon">💬</div>
+                  <div className="empty-icon">✦</div>
                   <p className="empty-title">暂无会话记录</p>
                   <p className="empty-desc">开始协作后，最近的会话将显示在这里</p>
                 </div>
@@ -143,7 +147,7 @@ export default function DashboardPage() {
                   {stats.sessions.recent.map((session) => (
                     <div
                       key={session.id}
-                      className="flex items-center gap-3 p-3 rounded-lg border border-grid hover:border-grid-hover hover:bg-surface/50 transition-all duration-200"
+                      className="flex items-center gap-3 p-3 border-2 border-[#e5e5e5] hover:border-[#0f0f0f] transition-all"
                     >
                       <EmojiSVG emoji="💬" size={20} />
                       <div className="flex-1 min-w-0">
@@ -159,7 +163,7 @@ export default function DashboardPage() {
             </section>
 
             {/* 认知多样性面板 */}
-            <section className="card p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "300ms" }}>
+            <section className="pixel-area pixel-area-hover p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "300ms" }}>
               <h2 className="section-title">
                 🧠 认知多样性
               </h2>
@@ -168,20 +172,20 @@ export default function DashboardPage() {
 
             {/* 反事实推理历史 */}
             {cfHistory.length > 0 && (
-              <section className="card p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "350ms" }}>
+              <section className="pixel-area pixel-area-hover p-6 mb-6 animate-fade-in-up" style={{ animationDelay: "350ms" }}>
                 <h2 className="section-title">
                   🔮 反事实推理
                 </h2>
                 <div className="space-y-3">
                   {cfHistory.map((cf, i) => (
-                    <div key={i} className="p-4 rounded-lg border border-grid hover:border-grid-hover transition-colors">
+                    <div key={i} className="p-4 border-2 border-[#e5e5e5] hover:border-[#0f0f0f] transition-colors">
                       <p className="pixel-text text-[0.625rem] text-muted mb-1.5">
                         {cf.topic.slice(0, 60)}...
                       </p>
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.625rem] pixel-text">
                         <span className="text-muted">实际: {cf.actualPath.agents.join(", ")}</span>
                         {cf.bestAlternative && (
-                          <span className="text-primary">
+                          <span className="text-ink font-semibold">
                             替代: {cf.bestAlternative.agents.join(", ")} (+{cf.bestAlternative.estimatedScore - Math.round(cf.actualPath.efficiency * 0.3 + cf.actualPath.quality * 0.4 + cf.actualPath.diversity * 0.3)}分)
                           </span>
                         )}
@@ -194,7 +198,7 @@ export default function DashboardPage() {
             )}
 
             {/* 快捷入口 */}
-            <section className="gradient-card-blue rounded-xl p-6 animate-fade-in-up" style={{ animationDelay: "400ms" }}>
+            <section className="pixel-area pixel-area-hover p-6 animate-fade-in-up" style={{ animationDelay: "400ms" }}>
               <h2 className="section-title">
                 <EmojiSVG emoji="⚡" size={14} /> 快捷入口
               </h2>
@@ -208,7 +212,7 @@ export default function DashboardPage() {
                 <Link href="/workspace" className="btn-pixel">
                   工作区文件
                 </Link>
-                <Link href="/dreams" className="btn-pixel" style={{ borderColor: "#a78bfa", color: "#7c3aed" }}>
+                <Link href="/dreams" className="btn-pixel">
                   🌙 Agent 梦境
                 </Link>
               </div>

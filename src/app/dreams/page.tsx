@@ -36,7 +36,9 @@ export default function DreamsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-surface">
+    <div className="min-h-screen bg-white">
+      <div className="pixel-grid-bg" />
+      
       {/* 顶部导航 */}
       <nav className="nav-bar">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -68,19 +70,19 @@ export default function DreamsPage() {
           transition={{ delay: 0.15 }}
           className="grid grid-cols-4 gap-4 mb-8"
         >
-          <div className="stat-card text-center">
+          <div className="stat-2d text-center">
             <p className="stat-value text-ink">{stats.totalMemories}</p>
             <p className="stat-label">记忆条目</p>
           </div>
-          <div className="stat-card text-center">
+          <div className="stat-2d text-center">
             <p className="stat-value text-primary">{stats.totalDreams}</p>
             <p className="stat-label">梦境报告</p>
           </div>
-          <div className="stat-card text-center">
+          <div className="stat-2d text-center">
             <p className="stat-value text-success">{stats.adoptedDreams}</p>
             <p className="stat-label">已采纳</p>
           </div>
-          <div className="stat-card text-center flex flex-col items-center justify-center gap-2">
+          <div className="stat-2d text-center flex flex-col items-center justify-center gap-2">
             <button
               onClick={handleGenerate}
               disabled={generating}
@@ -98,7 +100,7 @@ export default function DreamsPage() {
             animate={{ opacity: 1 }}
             className="empty-state"
           >
-            <span className="empty-icon">🌙</span>
+            <span className="empty-icon">✦</span>
             <p className="empty-title">还没有梦境报告</p>
             <p className="empty-desc">
               完成一些任务后，点击"生成梦境"让 Agent 产生跨领域创意联想
