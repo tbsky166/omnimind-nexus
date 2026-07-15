@@ -1,9 +1,20 @@
-import { NextResponse } from "next/server";
-import { globalKnowledgeGraph } from "@/lib/kg-store";
+import { NextRequest, NextResponse } from "next/server";
+import { getKnowledgeGraph } from "@/lib/kg-store";
 import { generateGraphSummary } from "@/lib/knowledge-graph";
 
-export async function GET() {
-  const entities = Array.from(globalKnowledgeGraph.entities.values()).map((e) => ({
+function getUserId(req: NextRequest): string | null {
+  return req.headers.get("x-user-id") || null;
+}
+
+export async function GET(req: NextRequest) {
+  const userId = getUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  const kg = getKnowledgeGraph(userId);
+
+  const entities = Array.from(kg.entities.values()).map((e) => ({
     id: e.id,
     name: e.name,
     type: e.type,
@@ -15,7 +26,7 @@ export async function GET() {
     decayed: e.decayed,
   }));
 
-  const relations = globalKnowledgeGraph.relations.map((r) => ({
+  const relations = kg.relations.map((r) => ({
     id: r.id,
     from: r.from,
     to: r.to,
@@ -25,15 +36,15 @@ export async function GET() {
     context: r.context,
   }));
 
-  const summary = entities.length > 0 ? generateGraphSummary(globalKnowledgeGraph) : "";
+  const summary = entities.length > 0 ? generateGraphSummary(kg) : "";
 
   return NextResponse.json({
     stats: {
-      totalEntities: globalKnowledgeGraph.stats.totalEntities,
-      totalRelations: globalKnowledgeGraph.stats.totalRelations,
-      avgConfidence: globalKnowledgeGraph.stats.avgConfidence,
-      lastUpdated: globalKnowledgeGraph.stats.lastUpdated,
-      sessionCount: globalKnowledgeGraph.stats.sessionCount,
+      totalEntities: kg.stats.totalEntities,
+      totalRelations: kg.stats.totalRelations,
+      avgConfidence: kg.stats.avgConfidence,
+      lastUpdated: kg.stats.lastUpdated,
+      sessionCount: kg.stats.sessionCount,
     },
     entities,
     relations,

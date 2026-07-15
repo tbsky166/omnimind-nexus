@@ -185,12 +185,22 @@ function estimateQualityImprovement(original: string, refined: string, attack: s
 }
 
 // ── 存储 / Storage ──
-const REFINE_STORAGE_KEY = "refinement_history";
+const REFINE_STORAGE_PREFIX = "refinement_history";
+
+function getRefineKey(userId: string): string {
+  return `${REFINE_STORAGE_PREFIX}_${userId}`;
+}
+
+let currentUserId = "";
+
+export function setRefinementUserId(userId: string): void {
+  currentUserId = userId;
+}
 
 export function getRefinementHistory(): RefinementResult[] {
   if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(REFINE_STORAGE_KEY);
+    const stored = localStorage.getItem(getRefineKey(currentUserId || "anonymous"));
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
@@ -203,6 +213,6 @@ export function saveRefinementResult(result: RefinementResult): void {
     const history = getRefinementHistory();
     history.push(result);
     if (history.length > 50) history.shift();
-    localStorage.setItem(REFINE_STORAGE_KEY, JSON.stringify(history));
+    localStorage.setItem(getRefineKey(currentUserId || "anonymous"), JSON.stringify(history));
   } catch {}
 }

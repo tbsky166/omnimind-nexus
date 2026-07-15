@@ -389,6 +389,65 @@ export const DOC_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "browser_navigate",
+      description: "使用 Playwright 浏览器导航到指定 URL，获取页面内容和进行交互。先导航到页面，再使用 browser_extract_text 提取文本，或 browser_screenshot 截图。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "要导航的完整 URL，如 https://example.com" },
+        },
+        required: ["url"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_extract_text",
+      description: "提取当前浏览器页面的文本内容（最多 10000 字符）。先使用 browser_navigate 导航到页面。",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_screenshot",
+      description: "对当前浏览器页面截图，返回 base64 编码的 PNG 图片。先使用 browser_navigate 导航到页面。",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_click",
+      description: "在浏览器页面中点击指定 CSS 选择器的元素。",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "CSS 选择器，如 button.submit、#login、a.nav-link" },
+        },
+        required: ["selector"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "browser_type",
+      description: "在浏览器页面的输入框中输入文本。",
+      parameters: {
+        type: "object",
+        properties: {
+          selector: { type: "string", description: "输入框的 CSS 选择器" },
+          text: { type: "string", description: "要输入的文本" },
+        },
+        required: ["selector", "text"],
+      },
+    },
+  },
 ];
 
 // ---- Agent Prompt Builder ----
@@ -975,14 +1034,21 @@ export async function callLLM(
     body.tool_choice = "auto";
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error(
+      `无法连接到 API 服务器 (${baseUrl})：${e instanceof Error ? e.message : "网络错误"}。请检查 Base URL 是否正确、网络是否连通。`
+    );
+  }
 
   if (!response.ok) {
     const errText = await response.text();
@@ -1100,15 +1166,22 @@ export async function callLLMStream(
     body.tool_choice = "auto";
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    throw new Error(
+      `无法连接到 API 服务器 (${baseUrl})：${e instanceof Error ? e.message : "网络错误"}。请检查 Base URL 是否正确、网络是否连通。`
+    );
+  }
 
   if (!response.ok) {
     const errText = await response.text();

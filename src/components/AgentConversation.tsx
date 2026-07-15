@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ConversationMessage } from "@/data/agents";
@@ -8,7 +8,7 @@ import sprites, { type SpriteData } from "@/data/sprites";
 import EmojiSVG from "@/components/EmojiSVG";
 import { useSettings } from "@/lib/settings";
 import { evolvePersonality } from "@/lib/personality";
-import { trackAgentRun } from "@/lib/achievements";
+import { getCurrentUserId } from "@/lib/pouch";
 import ReasoningTree from "@/components/ReasoningTree";
 
 // ── 斜杠命令 ──
@@ -122,14 +122,182 @@ function StatusDot({ status }: { status: "waiting" | "active" | "done" | "error"
   return <span className="w-2 h-2 bg-red-500" />;
 }
 
-function SimpleMarkdown({ text }: { text: string }) {
-  const html = text
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    .replace(/`([^`]+)`/g, "<code style='background:#f0f0f0;padding:0 4px;font-family:inherit'>$1</code>")
-    .replace(/\n/g, "<br/>");
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
+// ── 轻量级 Markdown 解析器（无依赖，纯字符串处理） ──
+function renderLightMD(text: string): string {
+  let html = text;
+
+  // 0. 保护 code blocks / Escape fenced code blocks
+  const codeBlocks: string[] = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(`<pre class="md-code-block"><code>${code.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</code></pre>`);
+    return `\x00CODEBLOCK${idx}\x00`;
+  });
+
+  // 1. 保护 inline code / Escape inline code
+  const inlineCodes: string[] = [];
+  html = html.replace(/`([^`]+)`/g, (_, code) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code class="md-inline-code">${code.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</code>`);
+    return `\x00INLINE${idx}\x00`;
+  });
+
+  // 2. 表格 / Tables (before line breaks to avoid interference)
+  html = html.replace(/(\|[^\n]+\|\n\|[-| :]+\|\n((?:\|[^\n]+\|\n?)*))/g, (match) => {
+    const lines = match.trim().split("\n");
+    if (lines.length < 2) return match;
+    let table = '<table class="md-table"><thead><tr>';
+    const headerCells = lines[0].split("|").filter(c => c.trim());
+    headerCells.forEach(c => { table += `<th>${c.trim()}</th>`; });
+    table += '</tr></thead><tbody>';
+    for (let i = 2; i < lines.length; i++) {
+      const cells = lines[i].split("|").filter(c => c.trim());
+      table += '<tr>';
+      cells.forEach(c => { table += `<td>${c.trim()}</td>`; });
+      table += '</tr>';
+    }
+    table += '</tbody></table>';
+    return table;
+  });
+
+  // 3. 标题 / Headers (h1-h3)
+  html = html.replace(/^### (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 class="md-h2">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 class="md-h1">$1</h1>');
+
+  // 4. 水平线 / Horizontal rules
+  html = html.replace(/^---$/gm, '<hr class="md-hr"/>');
+
+  // 5. 引用块 / Blockquotes
+  html = html.replace(/^> (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>');
+
+  // 6. 无序列表 / Unordered lists
+  html = html.replace(/^(\s*)[-*] (.+)$/gm, '<li class="md-li">$2</li>');
+  html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul class="md-ul">$1</ul>');
+
+  // 7. 有序列表 / Ordered lists
+  html = html.replace(/^(\s*)\d+\. (.+)$/gm, '<li class="md-li">$2</li>');
+
+  // 8. 粗体 / Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  // 9. 斜体 / Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // 10. 链接 / Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="md-link" href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // 11. 换行 / Line breaks
+  html = html.replace(/\n\n/g, '<br/><br/>');
+  html = html.replace(/\n/g, '<br/>');
+
+  // 12. 恢复 code blocks / Restore code blocks
+  html = html.replace(/\x00CODEBLOCK(\d+)\x00/g, (_, i) => codeBlocks[parseInt(i)]);
+  html = html.replace(/\x00INLINE(\d+)\x00/g, (_, i) => inlineCodes[parseInt(i)]);
+
+  return html;
 }
+
+// ── 单条消息渲染组件（memo 优化） ──
+const MessageBubble = memo(function MessageBubble({
+  msg, isUser, isStreaming, isLast
+}: {
+  msg: ConversationMessage;
+  isUser: boolean;
+  isStreaming: boolean;
+  isLast: boolean;
+}) {
+  const isQualityGate = msg.speaker === "Quality Gate";
+  const mdHtml = useMemo(() => msg.content ? renderLightMD(msg.content) : "", [msg.content]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""} ${msg.isSystem ? "p-3 border-2 border-[#e5e5e5] bg-white" : ""}`}
+    >
+      {!isUser && <PixelSprite name={msg.speaker} size={28} />}
+      <div className={`max-w-[70%] ${isUser ? "text-right" : ""}`}>
+        <div className={`flex items-center gap-1.5 mb-1 ${isUser ? "justify-end" : ""}`}>
+          {isUser ? (
+            <span className="pixel-text text-[9px] text-[#8a8a8a]">YOU</span>
+          ) : (
+            <>
+              {msg.emoji && <EmojiSVG emoji={msg.emoji} size={10} />}
+              <span className="pixel-text text-[9px] text-[#0f0f0f] font-medium">{msg.speaker}</span>
+              {msg.a2aLayer && <span className="pixel-text text-[7px] text-[#b0b0b0]">{msg.a2aLayer}</span>}
+              {msg.isSystem && <span className="badge-pixel text-[7px]">系统</span>}
+            </>
+          )}
+        </div>
+        {msg.content && (
+          <div className={`px-4 py-3 ${
+            isUser
+              ? "bg-[#0f0f0f] text-white"
+              : isQualityGate
+                ? "border-2 border-[#0f0f0f] bg-[#f5fdf7]"
+                : "border-2 border-[#0f0f0f] bg-white"
+          }`}>
+            <div className={`pixel-text whitespace-pre-wrap break-words markdown-body ${
+              isQualityGate ? "text-[10px] leading-relaxed" : "text-[11px] leading-relaxed"
+            }`}>
+              {mdHtml ? (
+                <span dangerouslySetInnerHTML={{ __html: mdHtml }} />
+              ) : (
+                msg.content
+              )}
+              {isStreaming && isLast && (
+                <motion.span className="inline-block w-[2px] h-[11px] bg-[#0f0f0f] ml-0.5 align-middle" animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.6, repeat: Infinity }} />
+              )}
+            </div>
+          </div>
+        )}
+        {msg.fileUrl && (
+          <a href={msg.fileUrl} download={msg.downloadName} className="mt-1.5 flex items-center gap-2 px-3 py-2 border-2 border-[#0f0f0f] bg-white hover:bg-[#0f0f0f] hover:text-white transition-all duration-150 group cursor-pointer">
+            <ToolIcon type={msg.fileFormat || "file"} size={18} />
+            <div className="flex-1 min-w-0">
+              <p className="pixel-text text-[9px] text-[#0f0f0f] group-hover:text-white truncate font-medium">{msg.downloadName}</p>
+              <p className="pixel-text text-[7px] text-[#8a8a8a] group-hover:text-white/60">{msg.toolAction || "DOWNLOAD"}</p>
+            </div>
+          </a>
+        )}
+        {/* 工具调用结果卡片 */}
+        {msg.toolName && !msg.fileUrl && (
+          <div className={`mt-1.5 border-2 px-3 py-2 ${
+            msg.toolSuccess !== false
+              ? "border-[#0f0f0f] bg-white"
+              : "border-red-500 bg-red-50"
+          }`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="pixel-text text-[10px]">{msg.toolSuccess !== false ? "✅" : "❌"}</span>
+              <span className="pixel-text text-[9px] font-bold text-[#0f0f0f]">{msg.toolName}</span>
+              <span className="pixel-text text-[8px] text-[#8a8a8a]">{msg.toolAction}</span>
+            </div>
+            {msg.content && (
+              <div className="pixel-text text-[10px] text-[#0f0f0f] whitespace-pre-wrap break-words">
+                <span dangerouslySetInnerHTML={{ __html: renderLightMD(msg.content) }} />
+              </div>
+            )}
+            {msg.toolResult && (
+              <details className="mt-1">
+                <summary className="pixel-text text-[8px] text-[#8a8a8a] cursor-pointer hover:text-[#0f0f0f]">查看原始结果</summary>
+                <pre className="mt-1 pixel-text text-[8px] text-[#6b7280] bg-[#fafafa] p-2 border border-[#e0e0e0] max-h-[120px] overflow-y-auto whitespace-pre-wrap">{msg.toolResult}</pre>
+              </details>
+            )}
+          </div>
+        )}
+      </div>
+      {isUser && (
+        <div className="flex-shrink-0 mt-0.5">
+          <div className="w-[34px] h-[34px] border-2 border-[#0f0f0f] bg-white flex items-center justify-center">
+            <span className="pixel-text text-[9px] font-bold text-[#0f0f0f]">YOU</span>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+});
 
 // ═══════════════════════════════════════════════════════════════
 // 主组件
@@ -151,6 +319,10 @@ export default function AgentConversation() {
   const [slashOpen, setSlashOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [showReasoningTree, setShowReasoningTree] = useState(false);
+  // ── 审批状态 / Approval state ──
+  const [pendingApproval, setPendingApproval] = useState<{ id: string; filePath: string; oldString: string; newString: string; diffLines: number } | null>(null);
+  // ── 工具进度状态 / Tool progress state ──
+  const [toolProgress, setToolProgress] = useState<Map<string, { name: string; status: "running" | "done"; result?: string }>>(new Map());
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -186,7 +358,7 @@ export default function AgentConversation() {
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Upload failed"); }
       const data = await res.json();
       setUploadedFile({ name: file.name, content: data.content, type: data.type });
-      setMessages(prev => [...prev, { speaker: "System", emoji: "\uD83D\uDCCE", content: `已上传：${file.name}`, isSystem: true }]);
+      setMessages(prev => [...prev, { speaker: "System", emoji: "📎", content: `已上传：${file.name}`, isSystem: true }]);
     } catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); }
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
   }, []);
@@ -198,10 +370,10 @@ export default function AgentConversation() {
     setInput(""); setError(null); setLoading(true);
     const sessionId = currentSessionIdRef.current || `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     if (!currentSessionIdRef.current) setCurrentSessionId(sessionId);
-    const userMsg: ConversationMessage = { speaker: "YOU", emoji: "\uD83D\uDC64", content: uploadedFileRef.current ? `[${uploadedFileRef.current.name}] ${text}` : text, isUser: true };
+    const userMsg: ConversationMessage = { speaker: "YOU", emoji: "👤", content: uploadedFileRef.current ? `[${uploadedFileRef.current.name}] ${text}` : text, isUser: true };
     setMessages(prev => [...prev, userMsg]);
     try {
-      const body: Record<string, unknown> = { message: text, history: messagesRef.current, settings: { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, tavilyApiKey: settings.tavilyApiKey, enableSwarm: settings.enableSwarm, enableEvolution: settings.enableEvolution, enableKnowledgeGraph: settings.enableKnowledgeGraph, enableMetacognition: settings.enableMetacognition } };
+      const body: Record<string, unknown> = { message: text, history: messagesRef.current, settings: { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, tavilyApiKey: settings.tavilyApiKey } };
       if (uploadedFileRef.current) body.fileContext = uploadedFileRef.current.content;
       const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || `HTTP ${res.status}`); }
@@ -218,25 +390,40 @@ export default function AgentConversation() {
             try {
               const parsed = JSON.parse(data);
               if (parsed.streaming === "delta" && parsed.delta) { setMessages(prev => { const last = prev[prev.length - 1]; if (last && !last.fileUrl) return [...prev.slice(0, -1), { ...last, content: last.content + parsed.delta }]; return prev; }); continue; }
-              if (parsed.streaming === "start") { setMessages(prev => [...prev, { speaker: parsed.speaker || "Agent", emoji: parsed.emoji || "\uD83E\uDD16", content: "", a2aLayer: parsed.a2aLayer, isSystem: false, isUser: false }]); continue; }
+              if (parsed.streaming === "start") { setMessages(prev => [...prev, { speaker: parsed.speaker || "Agent", emoji: parsed.emoji || "🤖", content: "", a2aLayer: parsed.a2aLayer, isSystem: false, isUser: false }]); continue; }
               if (parsed.streaming === "end") { setMessages(prev => { const last = prev[prev.length - 1]; if (last && !last.fileUrl) return [...prev.slice(0, -1), { ...last, content: parsed.content || last.content, speaker: parsed.speaker || last.speaker, emoji: parsed.emoji || last.emoji, a2aLayer: parsed.a2aLayer || last.a2aLayer }]; return prev; }); continue; }
-              if (parsed.type === "diversity") { try { const { type, ...d } = parsed; localStorage.setItem("last_diversity_metrics", JSON.stringify(d)); } catch {} continue; }
+              if (parsed.type === "diversity") { try { const { type, ...d } = parsed; const uid = getCurrentUserId() || "anonymous"; localStorage.setItem(`last_diversity_metrics_${uid}`, JSON.stringify(d)); } catch {} continue; }
               if (parsed.type === "personality_evolve") { try { evolvePersonality(parsed.agentName, { type: parsed.feedbackType, intensity: parsed.intensity }); } catch {} continue; }
-              if (parsed.speaker && (parsed.content || parsed.fileUrl)) { setMessages(prev => [...prev, { speaker: parsed.speaker, emoji: parsed.emoji || "\uD83E\uDD16", content: parsed.content || "", a2aLayer: parsed.a2aLayer, isSystem: parsed.isSystem || false, isUser: false, fileUrl: parsed.fileUrl, downloadName: parsed.downloadName, fileFormat: parsed.fileFormat, toolName: parsed.toolName, toolAction: parsed.toolAction }]); }
+              // ── 审批事件 / Approval event ──
+              if (parsed.type === "approval_needed") { setPendingApproval({ id: parsed.id, filePath: parsed.filePath, oldString: parsed.oldString, newString: parsed.newString, diffLines: parsed.diffLines }); continue; }
+              // ── 工具进度事件 / Tool progress event ──
+              if (parsed.type === "tool_progress") {
+                setToolProgress(prev => {
+                  const next = new Map(prev);
+                  if (parsed.event === "tool_start") {
+                    next.set(parsed.name, { name: parsed.name, status: "running" });
+                  } else if (parsed.event === "tool_end") {
+                    next.set(parsed.name, { name: parsed.name, status: "done", result: parsed.result });
+                  }
+                  return next;
+                });
+                continue;
+              }
+              if (parsed.speaker && (parsed.content || parsed.fileUrl || parsed.toolName)) { setMessages(prev => [...prev, { speaker: parsed.speaker, emoji: parsed.emoji || "🤖", content: parsed.content || "", a2aLayer: parsed.a2aLayer, isSystem: parsed.isSystem || false, isUser: false, fileUrl: parsed.fileUrl, downloadName: parsed.downloadName, fileFormat: parsed.fileFormat, toolName: parsed.toolName, toolAction: parsed.toolAction, toolSuccess: parsed.toolSuccess, toolResult: parsed.toolResult }]); }
             } catch {}
           }
         }
       } catch (e) { console.error("Stream read error:", e); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
-      setMessages(prev => [...prev, { speaker: "System", emoji: "\u26A0\uFE0F", content: `Error: ${e instanceof Error ? e.message : "Unknown error"}`, isSystem: true }]);
+      setMessages(prev => [...prev, { speaker: "System", emoji: "⚠️", content: `Error: ${e instanceof Error ? e.message : "Unknown error"}`, isSystem: true }]);
     } finally {
       setLoading(false);
+      setToolProgress(new Map());
       setMessages(prev => {
         saveSession(prev, sessionId);
         const agentStats = new Map<string, { tools: number; searches: number; files: number; success: boolean }>();
         for (const msg of prev) { if (msg.isUser) continue; const name = msg.speaker; if (!agentStats.has(name)) agentStats.set(name, { tools: 0, searches: 0, files: 0, success: true }); const s = agentStats.get(name)!; if (msg.fileUrl) s.files++; if (msg.toolName === "web_search") s.searches++; if (msg.toolName) s.tools++; if (msg.content?.includes("Error")) s.success = false; }
-        for (const [name, stats] of agentStats) { if (!["Router", "Planner", "仲裁组", "Quality Gate", "System"].includes(name)) trackAgentRun(name, stats.success, stats.tools, stats.searches, stats.files); }
         return prev;
       });
     }
@@ -266,12 +453,21 @@ export default function AgentConversation() {
       case "/debate": router.push("/debate"); return true;
       case "/topology": router.push("/topology"); return true;
       case "/kb": router.push("/kb"); return true;
-      case "/help": setMessages(prev => [...prev, { speaker: "System", emoji: "\u2753", isSystem: true, content: SLASH_COMMANDS.map(c => `**${c.cmd}** \u2014 ${c.desc}`).join("\n") }]); setInput(""); setSlashOpen(false); return true;
+      case "/help": setMessages(prev => [...prev, { speaker: "System", emoji: "❓", isSystem: true, content: SLASH_COMMANDS.map(c => `**${c.cmd}** — ${c.desc}`).join("\n") }]); setInput(""); setSlashOpen(false); return true;
       default: return false;
     }
   };
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { if (input.startsWith("/") && executeSlashCommand(input)) { e.preventDefault(); return; } handleSend(e); } if (e.key === "Escape") setSlashOpen(false); };
   const handleNewSession = () => { setMessages([]); setCurrentSessionId(""); setUploadedFile(null); setError(null); };
+  // ── 审批处理 / Approval handlers ──
+  const handleApprove = useCallback(async (id: string) => {
+    try { await fetch("/api/approval", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve", id }) }); } catch {}
+    setPendingApproval(null);
+  }, []);
+  const handleDeny = useCallback(async (id: string) => {
+    try { await fetch("/api/approval", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "deny", id }) }); } catch {}
+    setPendingApproval(null);
+  }, []);
   const formatDate = (ts: number) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`; };
   useEffect(() => { if (chatContainerRef.current) chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight; }, [messages]);
 
@@ -279,7 +475,7 @@ export default function AgentConversation() {
   const agentNodes = useMemo(() => {
     const nodes: { id: string; name: string; emoji: string; layer: string; status: "waiting" | "active" | "done" | "error" }[] = [];
     const seen = new Set<string>();
-    for (const msg of messages) { if (msg.isUser) continue; const nodeId = `${msg.speaker}_${msg.a2aLayer || ""}`; if (seen.has(nodeId)) continue; seen.add(nodeId); nodes.push({ id: nodeId, name: msg.speaker, emoji: msg.emoji || (msg.isSystem ? "\u2699\uFE0F" : "\uD83E\uDD16"), layer: msg.a2aLayer || "", status: "done" }); }
+    for (const msg of messages) { if (msg.isUser) continue; const nodeId = `${msg.speaker}_${msg.a2aLayer || ""}`; if (seen.has(nodeId)) continue; seen.add(nodeId); nodes.push({ id: nodeId, name: msg.speaker, emoji: msg.emoji || (msg.isSystem ? "⚙️" : "🤖"), layer: msg.a2aLayer || "", status: "done" }); }
     if (loading && nodes.length > 0) { const last = [...nodes].reverse().find(n => !["Router", "Planner", "YOU", "仲裁组", "Quality Gate"].includes(n.name)); if (last) last.status = "active"; else nodes[nodes.length - 1].status = "active"; }
     return nodes;
   }, [messages, loading]);
@@ -371,9 +567,28 @@ export default function AgentConversation() {
               <button onClick={handleNewSession} className="pixel-text text-[10px] text-[#8a8a8a] hover:text-[#0f0f0f] transition-colors">+ 新建</button>
               <span className="text-[#d1d5db]">|</span>
               <button onClick={() => setShowReasoningTree(!showReasoningTree)} className={`pixel-text text-[10px] transition-colors ${showReasoningTree ? "text-[#0f0f0f] font-bold" : "text-[#8a8a8a] hover:text-[#0f0f0f]"}`}>TREE</button>
+              {/* ── 工具进度指示器 / Tool progress indicator ── */}
+              {toolProgress.size > 0 && (
+                <>
+                  <span className="text-[#d1d5db]">|</span>
+                  <div className="flex items-center gap-1.5">
+                    {Array.from(toolProgress.values()).filter(t => t.status === "running").map(t => (
+                      <span key={t.name} className="flex items-center gap-1 px-1.5 py-0.5 border border-[#0f0f0f] bg-[#fafafa]">
+                        <motion.span className="w-1.5 h-1.5 bg-green-500" animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 0.6, repeat: Infinity }} />
+                        <span className="pixel-text text-[8px] text-[#0f0f0f]">{t.name}</span>
+                      </span>
+                    ))}
+                    {Array.from(toolProgress.values()).filter(t => t.status === "done").length > 0 && (
+                      <span className="pixel-text text-[8px] text-[#8a8a8a]">
+                        {Array.from(toolProgress.values()).filter(t => t.status === "done").length} done
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
               <span className="text-[#d1d5db]">|</span>
               <button onClick={handleExport} disabled={messages.length === 0} className="pixel-text text-[10px] text-[#8a8a8a] hover:text-[#0f0f0f] transition-colors disabled:opacity-30 flex items-center gap-1">
-                <EmojiSVG emoji="\uD83D\uDCC4" size={12} /> EXPORT
+                <EmojiSVG emoji="📄" size={12} /> EXPORT
               </button>
               {currentSessionId && <><span className="text-[#d1d5db]">|</span><span className="pixel-text text-[9px] text-[#8a8a8a] truncate max-w-[180px]">{messages.find(m => m.isUser)?.content?.slice(0, 30) || "会话"}</span></>}
               {saving && <span className="pixel-text text-[9px] text-[#8a8a8a] ml-auto">SAVING...</span>}
@@ -405,51 +620,7 @@ export default function AgentConversation() {
                   const isUser = msg.isUser;
                   const isStreaming = loading && i === messages.length - 1 && !msg.isUser && !msg.fileUrl;
                   return (
-                    <motion.div key={`${msg.speaker}_${i}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}
-                      className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""} ${msg.isSystem ? "p-3 border-2 border-[#e5e5e5] bg-white" : ""}`}
-                    >
-                      {!isUser && <PixelSprite name={msg.speaker} size={28} />}
-                      <div className={`max-w-[70%] ${isUser ? "text-right" : ""}`}>
-                        <div className={`flex items-center gap-1.5 mb-1 ${isUser ? "justify-end" : ""}`}>
-                          {isUser ? (
-                            <span className="pixel-text text-[9px] text-[#8a8a8a]">YOU</span>
-                          ) : (
-                            <>
-                              {msg.emoji && <EmojiSVG emoji={msg.emoji} size={10} />}
-                              <span className="pixel-text text-[9px] text-[#0f0f0f] font-medium">{msg.speaker}</span>
-                              {msg.a2aLayer && <span className="pixel-text text-[7px] text-[#b0b0b0]">{msg.a2aLayer}</span>}
-                              {msg.isSystem && <span className="badge-pixel text-[7px]">系统</span>}
-                            </>
-                          )}
-                        </div>
-                        {msg.content && (
-                          <div className={`px-4 py-3 text-sm leading-relaxed ${
-                            isUser ? "bg-[#0f0f0f] text-white" : "border-2 border-[#0f0f0f] bg-white"
-                          }`}>
-                            <div className="pixel-text text-[11px] whitespace-pre-wrap break-words">
-                              <SimpleMarkdown text={msg.content} />
-                              {isStreaming && <motion.span className="inline-block w-[2px] h-[11px] bg-[#0f0f0f] ml-0.5 align-middle" animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.6, repeat: Infinity }} />}
-                            </div>
-                          </div>
-                        )}
-                        {msg.fileUrl && (
-                          <a href={msg.fileUrl} download={msg.downloadName} className="mt-1.5 flex items-center gap-2 px-3 py-2 border-2 border-[#0f0f0f] bg-white hover:bg-[#0f0f0f] hover:text-white transition-all duration-150 group cursor-pointer">
-                            <ToolIcon type={msg.fileFormat || "file"} size={18} />
-                            <div className="flex-1 min-w-0">
-                              <p className="pixel-text text-[9px] text-[#0f0f0f] group-hover:text-white truncate font-medium">{msg.downloadName}</p>
-                              <p className="pixel-text text-[7px] text-[#8a8a8a] group-hover:text-white/60">{msg.toolAction || "DOWNLOAD"}</p>
-                            </div>
-                          </a>
-                        )}
-                      </div>
-                      {isUser && (
-                        <div className="flex-shrink-0 mt-0.5">
-                          <div className="w-[34px] h-[34px] border-2 border-[#0f0f0f] bg-white flex items-center justify-center">
-                            <span className="pixel-text text-[9px] font-bold text-[#0f0f0f]">YOU</span>
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
+                    <MessageBubble key={`${msg.speaker}_${i}`} msg={msg} isUser={!!isUser} isStreaming={isStreaming} isLast={i === messages.length - 1} />
                   );
                 })
               )}
@@ -465,6 +636,47 @@ export default function AgentConversation() {
 
             {/* 输入区 */}
             <div className="border-t-2 border-[#0f0f0f] p-4 bg-white relative flex-shrink-0">
+              {/* ── 审批卡片 / Approval card ── */}
+              <AnimatePresence>
+                {pendingApproval && (
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+                    className="absolute bottom-full left-0 right-0 mx-4 mb-2 border-2 border-[#0f0f0f] bg-white z-30"
+                  >
+                    <div className="px-4 py-3 border-b-2 border-[#0f0f0f] flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-yellow-400 animate-pulse" />
+                        <span className="pixel-label text-[8px]">CODE EDIT APPROVAL</span>
+                      </div>
+                      <span className="pixel-text text-[7px] text-[#8a8a8a]">30s 超时自动拒绝</span>
+                    </div>
+                    <div className="px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <EmojiSVG emoji="📄" size={14} />
+                        <span className="pixel-text text-[10px] text-[#0f0f0f] font-bold">{pendingApproval.filePath}</span>
+                        <span className="pixel-text text-[8px] text-[#8a8a8a]">{pendingApproval.diffLines > 0 ? `+${pendingApproval.diffLines}` : pendingApproval.diffLines} 行</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 max-h-[120px] overflow-y-auto">
+                        <div>
+                          <div className="pixel-text text-[7px] text-red-600 mb-1">- 删除</div>
+                          <pre className="pixel-text text-[8px] text-red-700 bg-red-50 p-2 border border-red-200 whitespace-pre-wrap break-all">{pendingApproval.oldString.substring(0, 150)}{pendingApproval.oldString.length > 150 ? "..." : ""}</pre>
+                        </div>
+                        <div>
+                          <div className="pixel-text text-[7px] text-green-600 mb-1">+ 新增</div>
+                          <pre className="pixel-text text-[8px] text-green-700 bg-green-50 p-2 border border-green-200 whitespace-pre-wrap break-all">{pendingApproval.newString.substring(0, 150)}{pendingApproval.newString.length > 150 ? "..." : ""}</pre>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button onClick={() => handleApprove(pendingApproval.id)} className="flex-1 px-4 py-2 border-2 border-[#0f0f0f] bg-[#0f0f0f] text-white hover:bg-green-600 hover:border-green-600 transition-colors">
+                          <span className="pixel-text text-[10px] font-bold">APPROVE</span>
+                        </button>
+                        <button onClick={() => handleDeny(pendingApproval.id)} className="flex-1 px-4 py-2 border-2 border-[#0f0f0f] bg-white text-[#0f0f0f] hover:bg-red-50 hover:border-red-600 hover:text-red-600 transition-colors">
+                          <span className="pixel-text text-[10px] font-bold">DENY</span>
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
               {filteredCommands.length > 0 && (
                 <div className="absolute bottom-full left-0 right-0 border-2 border-[#0f0f0f] bg-white max-h-[240px] overflow-y-auto z-30 mx-2">
                   {filteredCommands.map(c => (
@@ -478,18 +690,18 @@ export default function AgentConversation() {
               )}
               {uploadedFile && (
                 <div className="flex items-center gap-2 mb-2 px-2.5 py-1.5 border-2 border-[#0f0f0f] bg-[#fafafa]">
-                  <EmojiSVG emoji="\uD83D\uDCCE" size={14} />
+                  <EmojiSVG emoji="📎" size={14} />
                   <span className="pixel-text text-[10px] text-[#0f0f0f]">{uploadedFile.name}</span>
                   <span className="pixel-text text-[9px] text-[#8a8a8a] uppercase">{uploadedFile.type}</span>
-                  <button onClick={() => { setUploadedFile(null); setMessages(prev => [...prev, { speaker: "System", emoji: "\uD83D\uDCCE", content: `已移除：${uploadedFile.name}`, isSystem: true }]); }} className="pixel-text text-[10px] text-[#8a8a8a] hover:text-[#0f0f0f] ml-auto">
-                    <EmojiSVG emoji="\u2715" size={10} />
+                  <button onClick={() => { setUploadedFile(null); setMessages(prev => [...prev, { speaker: "System", emoji: "📎", content: `已移除：${uploadedFile.name}`, isSystem: true }]); }} className="pixel-text text-[10px] text-[#8a8a8a] hover:text-[#0f0f0f] ml-auto">
+                    <EmojiSVG emoji="✕" size={10} />
                   </button>
                 </div>
               )}
               <div className="flex gap-2">
                 <input ref={fileInputRef} type="file" accept=".docx,.doc,.xlsx,.xls" onChange={handleFileUpload} className="hidden" />
                 <button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading || uploading} className="btn-pixel flex-shrink-0">
-                  {uploading ? "..." : <EmojiSVG emoji="\uD83D\uDCCE" size={14} />}
+                  {uploading ? "..." : <EmojiSVG emoji="📎" size={14} />}
                 </button>
                 <input ref={inputRef} type="text" value={input} onChange={e => { setInput(e.target.value); setSlashOpen(e.target.value.startsWith("/")); }} onKeyDown={handleKeyDown}
                   placeholder={uploadedFile ? "分析这份文件..." : "输入任务，或输入 / 查看命令..."}
@@ -528,7 +740,7 @@ export default function AgentConversation() {
                             <p className="pixel-text text-[8px] text-[#8a8a8a] mt-0.5">{formatDate(s.updatedAt)} · {s.messageCount} msg</p>
                           </div>
                           <button onClick={e => { e.stopPropagation(); deleteSession(s.id); }} className="pixel-text text-[9px] text-[#8a8a8a] hover:text-red-600 transition-colors px-0.5 opacity-0 group-hover:opacity-100">
-                            <EmojiSVG emoji="\u2715" size={9} />
+                            <EmojiSVG emoji="✕" size={9} />
                           </button>
                         </div>
                       ))}

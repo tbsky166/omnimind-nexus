@@ -13,22 +13,35 @@ import * as path from "path";
 // 文件操作与文档生成 — 提供工作区文件读写、DOCX/XLSX 文档生成能力 / File operations and document generation — provides workspace file read/write and DOCX/XLSX document generation
 
 // ---- 临时文件目录 (public/temp/) / Temp file directory (public/temp/) ----
-// 临时文件目录 — 存放生成的 DOCX/XLSX 等文档 / Temp file directory — stores generated DOCX/XLSX documents
 const TEMP_DIR = path.join(process.cwd(), "public", "temp");
-// 工作区目录 — 存放用户文件读写操作的文件 / Workspace directory — stores files from user file read/write operations
-const WORKSPACE_DIR = path.join(process.cwd(), "public", "workspace");
+// 工作区基础目录 — 每用户子目录 / Workspace base directory — per-user subdirectories
+const WORKSPACE_BASE = path.join(process.cwd(), "public", "workspace");
 
-// 确保临时文件目录存在，不存在则递归创建 / Ensure temp directory exists, create recursively if missing
+// 模块级 userId（从 chat/route 设置）/ Module-level userId (set from chat/route)
+let currentUserId = "";
+
+/** 设置当前工作区用户（由 POST handler 调用）/ Set current workspace user (called by POST handler) */
+export function setWorkspaceUserId(userId: string): void {
+  currentUserId = userId;
+}
+
+function getWorkspaceDir(): string {
+  const uid = currentUserId || "anonymous";
+  return path.join(WORKSPACE_BASE, uid);
+}
+
+// 确保临时文件目录存在 / Ensure temp directory exists
 function ensureTempDir() {
   if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
   }
 }
 
-// 确保工作区目录存在，不存在则递归创建 / Ensure workspace directory exists, create recursively if missing
+// 确保工作区目录存在 / Ensure workspace directory exists
 function ensureWorkspaceDir() {
-  if (!fs.existsSync(WORKSPACE_DIR)) {
-    fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+  const dir = getWorkspaceDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -52,7 +65,7 @@ export async function executeFileWrite(args: Record<string, unknown>): Promise<{
   // Security: only allow files inside workspace
   const safeName = filePath.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+/, "");
   ensureWorkspaceDir();
-  const fullPath = path.join(WORKSPACE_DIR, safeName);
+  const fullPath = path.join(getWorkspaceDir(), safeName);
 
   try {
     if (action === "append" && fs.existsSync(fullPath)) {
@@ -89,7 +102,7 @@ export async function executeFileRead(filePath: string): Promise<{
   message: string;
 }> {
   const safeName = filePath.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+/, "");
-  const fullPath = path.join(WORKSPACE_DIR, safeName);
+  const fullPath = path.join(getWorkspaceDir(), safeName);
 
   if (!fs.existsSync(fullPath)) {
     return { success: false, content: "", message: `文件不存在: ${safeName}` };
@@ -107,7 +120,7 @@ export async function executeFileRead(filePath: string): Promise<{
 export function listWorkspaceFiles(): string[] {
   ensureWorkspaceDir();
   try {
-    return fs.readdirSync(WORKSPACE_DIR).filter((f) => !f.startsWith("."));
+    return fs.readdirSync(getWorkspaceDir()).filter((f) => !f.startsWith("."));
   } catch {
     return [];
   }
@@ -556,7 +569,7 @@ export async function executeGenerateDocument(args: Record<string, unknown>): Pr
   const safeTitle = title.replace(/[\\/:*?"<>|]/g, "_").slice(0, 50);
   const fileName = `${safeTitle}_${timestamp}.${ext}`;
   const filePath = path.join(TEMP_DIR, fileName);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, new Uint8Array(buffer));
 
   // API route for download (works in both dev & production)
   const fileUrl = `/api/files/${fileName}`;

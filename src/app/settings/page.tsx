@@ -179,6 +179,30 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* 暗色模式 / Dark Mode */}
+        <div className="pixel-area pixel-area-hover p-6 mb-6">
+          <h2 className="section-title">
+            <EmojiSVG emoji="🌙" size={14} /> 暗色模式
+          </h2>
+          <p className="pixel-text text-[10px] text-ink/40 mb-4">
+            像素暗黑主题 — 黑底白线，保持一致的 2D 极简风格。
+          </p>
+          <button
+            onClick={() => {
+              setLocal({ ...local, darkMode: !local.darkMode });
+              updateSettings({ ...local, darkMode: !local.darkMode });
+            }}
+            className={`w-full px-4 py-3 border-2 transition-colors text-left flex items-center justify-between ${local.darkMode ? "border-[#e0e0e0] bg-[#0f0f0f] text-[#e0e0e0]" : "border-[#0f0f0f] bg-white text-[#0f0f0f]"}`}
+          >
+            <span className="pixel-text text-[11px] font-bold uppercase">
+              {local.darkMode ? "🌙 暗色模式" : "☀️ 亮色模式"}
+            </span>
+            <span className="pixel-text text-[9px] opacity-60">
+              {local.darkMode ? "点击切换亮色" : "点击切换暗色"}
+            </span>
+          </button>
+        </div>
+
         {/* 模型参数 */}
         <div className="pixel-area pixel-area-hover p-6 mb-6">
           <h2 className="section-title">
@@ -211,39 +235,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* 高级特性 */}
-        <div className="pixel-area pixel-area-hover p-6 mb-8">
-          <h2 className="section-title">
-            <EmojiSVG emoji="🧠" size={14} /> 高级特性
-          </h2>
-          <div className="space-y-3">
-            {([
-              { key: "enableSwarm", label: "蜂群智能", desc: "基于信息素的集体决策机制", emoji: "🐝" },
-              { key: "enableEvolution", label: "基因进化", desc: "通过遗传算法优化 Agent 参数", emoji: "🧬" },
-              { key: "enableKnowledgeGraph", label: "知识图谱", desc: "带遗忘曲线的语义记忆系统", emoji: "📊" },
-              { key: "enableMetacognition", label: "元认知层", desc: "带认知偏差检测的自我反思", emoji: "🪞" },
-            ] as const).map((item) => (
-              <label
-                key={item.key}
-                className="flex items-center gap-3 p-3 border-2 border-[#e5e5e5] hover:border-ink/30 hover:bg-white cursor-pointer transition-all"
-              >
-                <EmojiSVG emoji={item.emoji} size={20} />
-                <div className="flex-1">
-                  <div className="pixel-text text-xs text-ink">{item.label}</div>
-                  <div className="pixel-text text-[10px] text-ink/40">{item.desc}</div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={local[item.key]}
-                  onChange={(e) => setLocal({ ...local, [item.key]: e.target.checked })}
-                  className="w-5 h-5 accent-ink"
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* 保存按钮 */}
+        
         <div className="flex items-center gap-4">
           <button
             onClick={handleSave}

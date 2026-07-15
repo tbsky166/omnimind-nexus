@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { SettingsProvider } from "@/lib/settings";
+import { AppProviders } from "@/components/AppProviders";
 
 export const metadata: Metadata = {
   title: "OmniMind Nexus — A2A Multi-Agent Platform",
@@ -23,7 +23,7 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <SettingsProvider>{children}</SettingsProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSettings } from "@/lib/settings";
 import { callLLM, type ChatMessage } from "@/lib/prompt";
-import { trackCanvasAction } from "@/lib/achievements";
 
 // ── 类型定义 ──
 interface CanvasElement {
@@ -111,7 +110,6 @@ export default function CanvasPage() {
         saveToStorage(next, null, null);
         return next;
       });
-      trackCanvasAction("USER");
     },
     [pushHistory, saveToStorage],
   );
@@ -438,9 +436,6 @@ export default function CanvasPage() {
               saveToStorage(next, null, null);
               return next;
             });
-            for (let i = 0; i < newElements.length; i++) {
-              trackCanvasAction("Agent");
-            }
             setAgentMessage(`Agent 添加了 ${newElements.length} 个元素！`);
           } else {
             setAgentMessage("Agent 未能生成有效绘图指令，请重试。");

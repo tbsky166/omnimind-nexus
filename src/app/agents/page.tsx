@@ -8,7 +8,6 @@ import sprites, { type SpriteData } from "@/data/sprites";
 import EmojiSVG from "@/components/EmojiSVG";
 import PersonalityRadar, { PersonalityEvolution } from "@/components/PersonalityRadar";
 import { initPersonality, getPersonality, getAllPersonalities, calculateSynergy, type AgentPersonality } from "@/lib/personality";
-import { getUnlockedAchievements, getAchievementById, getRarityColor, getRarityBg } from "@/lib/achievements";
 
 // 自定义 Agent 类型
 interface CustomAgent extends Agent {
@@ -348,34 +347,6 @@ export default function AgentsPage() {
                                 )}
 
                                 {/* 成就徽章 */}
-                                {(() => {
-                                  const achievements = getUnlockedAchievements(agent.name);
-                                  if (achievements.length === 0) return null;
-                                  return (
-                                    <div>
-                                      <div className="section-title mb-2">🏅 成就徽章</div>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {achievements.map((ua) => {
-                                          const ach = getAchievementById(ua.achievementId);
-                                          if (!ach) return null;
-                                          const clr = getRarityColor(ach.rarity);
-                                          const bg = getRarityBg(ach.rarity);
-                                          return (
-                                            <div
-                                              key={ua.achievementId}
-                                              className="badge-pixel flex items-center gap-1 px-2 py-1"
-                                              style={{ borderColor: clr, color: clr }}
-                                              title={ach.description}
-                                            >
-                                              <EmojiSVG emoji={ach.emoji} size={12} />
-                                              <span className="pixel-text text-[8px] font-medium">{ach.name}</span>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
 
                                 {/* 性格进化历史 */}
                                 <PersonalityEvolution personality={personality} />

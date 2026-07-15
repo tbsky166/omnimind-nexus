@@ -4,6 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 import { agents } from "@/data/agents";
+import { getCurrentUserId } from "@/lib/pouch";
 
 /** 反事实路径 / Counterfactual path */
 export interface CounterfactualPath {
@@ -178,13 +179,16 @@ export function analyzeCounterfactual(
   };
 }
 
-// ── 存储 / Storage ──
-const CF_STORAGE_KEY = "counterfactual_analyses";
+// ── 存储（按用户隔离）/ Storage (per-user) ──
+function getCFKey(): string {
+  const uid = typeof window !== "undefined" ? (getCurrentUserId() || "anonymous") : "anonymous";
+  return `counterfactual_analyses_${uid}`;
+}
 
 export function getCounterfactualHistory(): CounterfactualAnalysis[] {
   if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(CF_STORAGE_KEY);
+    const stored = localStorage.getItem(getCFKey());
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
@@ -197,6 +201,6 @@ export function saveCounterfactualAnalysis(analysis: CounterfactualAnalysis): vo
     const history = getCounterfactualHistory();
     history.push(analysis);
     if (history.length > 50) history.shift();
-    localStorage.setItem(CF_STORAGE_KEY, JSON.stringify(history));
+    localStorage.setItem(getCFKey(), JSON.stringify(history));
   } catch {}
 }

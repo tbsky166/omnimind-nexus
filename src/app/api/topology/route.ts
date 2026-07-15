@@ -1,12 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 
 // ── 协作拓扑图数据 / Collaboration topology graph data ──
 // 从会话历史中提取 Agent 协作关系 / Extract agent collaboration edges from session history
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const userId = req.headers.get("x-user-id") || "anonymous";
   try {
-    const topology = await buildTopology();
+    const topology = await buildTopology(userId);
     return NextResponse.json(topology);
   } catch (e) {
     return NextResponse.json({ nodes: [], edges: [] });
@@ -19,12 +20,12 @@ interface SessionMessage {
   isSystem?: boolean;
 }
 
-async function buildTopology() {
+async function buildTopology(userId: string) {
   const nodes = new Map<string, { id: string; label: string; count: number }>();
   const edges = new Map<string, { source: string; target: string; weight: number }>();
 
   try {
-    const dir = path.join(process.cwd(), "data", "sessions");
+    const dir = path.join(process.cwd(), "data", "users", userId, "sessions");
     const files = await fs.readdir(dir);
 
     for (const file of files.filter((f) => f.endsWith(".json"))) {

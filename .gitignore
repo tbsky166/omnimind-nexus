@@ -26,8 +26,8 @@ public/temp/
 # agent workspace (edited files)
 public/workspace/
 
-# session data
-data/sessions/
+# user data (contains passwords, API keys, personal data)
+data/
 
 # typescript
 *.tsbuildinfo

@@ -7,7 +7,7 @@ import { agents } from "@/data/agents";
 import sprites from "@/data/sprites";
 import EmojiSVG from "@/components/EmojiSVG";
 import { useSettings } from "@/lib/settings";
-import { trackCafeChat } from "@/lib/achievements";
+import { getCurrentUserId } from "@/lib/pouch";
 
 // ── 类型 / Types ──
 interface CafeMessage {
@@ -25,7 +25,10 @@ interface InspirationCard {
   timestamp: number;
 }
 
-const INSPIRATION_STORAGE_KEY = "cafe_inspirations";
+function getInspirationKey(): string {
+  const uid = typeof window !== "undefined" ? (getCurrentUserId() || "anonymous") : "anonymous";
+  return `cafe_inspirations_${uid}`;
+}
 
 // ── 咖啡杯蒸汽粒子 / Coffee steam particles ──
 const steamVariants = {
@@ -42,11 +45,11 @@ const steamVariants = {
   }),
 };
 
-// ── 加载灵感卡片 / Load inspiration cards from localStorage ──
+// ── 加载灵感卡片（按用户隔离）/ Load inspiration cards (per-user) ──
 function loadInspirations(): InspirationCard[] {
   if (typeof window === "undefined") return [];
   try {
-    const data = localStorage.getItem(INSPIRATION_STORAGE_KEY);
+    const data = localStorage.getItem(getInspirationKey());
     return data ? JSON.parse(data) : [];
   } catch {
     return [];
@@ -56,7 +59,7 @@ function loadInspirations(): InspirationCard[] {
 function saveInspirations(cards: InspirationCard[]) {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(INSPIRATION_STORAGE_KEY, JSON.stringify(cards));
+    localStorage.setItem(getInspirationKey(), JSON.stringify(cards));
   } catch {}
 }
 
@@ -197,8 +200,6 @@ export default function CafePage() {
                   emoji: parsed.emoji,
                 },
               ]);
-              // 追踪聊天 / Track chat
-              trackCafeChat(parsed.speaker);
             } else if (parsed.type === "cafe_inspiration") {
               const card: InspirationCard = {
                 id: `insp_${Date.now()}`,

@@ -33,6 +33,7 @@ const INSPIRATION_EMOJIS = ["💡", "✨", "🌟", "🎯", "🔮", "🌱", "🧩
 // ── Cafe API / Agent 咖啡馆闲聊 API ──
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
+  const userId = req.headers.get("x-user-id") || "anonymous";
 
   try {
     const { settings: clientSettings } = await req.json();
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
             });
 
             // 保存到 JSON 文件 / Save to JSON file
-            saveInspiration({
+            saveInspiration(userId, {
               title: parsed.inspiration.title,
               content: parsed.inspiration.content,
               emoji: inspEmoji,
@@ -332,8 +333,8 @@ function parseCafeConversation(
   return { messages, inspiration };
 }
 
-// ── 保存灵感卡片到 JSON 文件 / Save inspiration card to JSON ──
-function saveInspiration(card: {
+// ── 保存灵感卡片到 JSON 文件（按用户隔离）/ Save inspiration card to JSON (per-user) ──
+function saveInspiration(userId: string, card: {
   title: string;
   content: string;
   emoji: string;
@@ -342,7 +343,7 @@ function saveInspiration(card: {
   timestamp: number;
 }) {
   try {
-    const dataDir = path.join(process.cwd(), "data");
+    const dataDir = path.join(process.cwd(), "data", "users", userId);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
@@ -360,6 +361,8 @@ function saveInspiration(card: {
     }
 
     existing.push(card);
+    // 只保留最近 50 条
+    if (existing.length > 50) existing = existing.slice(-50);
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), "utf-8");
   } catch {
     // 静默失败，不影响主流程 / Fail silently, don't break main flow

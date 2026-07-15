@@ -38,21 +38,28 @@ interface TavilyResponse {
 
 // ── Tavily Search API 调用 ──
 async function tavilySearch(query: string, apiKey: string): Promise<TavilyResponse> {
-  const res = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      query,
-      search_depth: "basic",
-      include_answer: true,
-      include_raw_content: false,
-      max_results: 5,
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
+  let res: Response;
+  try {
+    res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        query,
+        search_depth: "basic",
+        include_answer: true,
+        include_raw_content: false,
+        max_results: 5,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (e) {
+    throw new Error(
+      `Tavily 搜索 API 连接失败：${e instanceof Error ? e.message : "网络错误"}。请检查网络连接，或确认 Tavily API 服务是否正常。`
+    );
+  }
 
   if (!res.ok) {
     const text = await res.text();

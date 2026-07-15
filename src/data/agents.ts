@@ -60,6 +60,8 @@ export interface ConversationMessage {
   fileFormat?: string;
   toolName?: string;
   toolAction?: string;
+  toolSuccess?: boolean;
+  toolResult?: string;
   streaming?: "start" | "delta" | "end";
   delta?: string;
 }

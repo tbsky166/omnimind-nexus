@@ -1,13 +1,24 @@
+// ═══════════════════════════════════════════════════════════════
+// 会话 API — 每用户独立存储
+// Sessions API — Per-user isolated storage
+// ═══════════════════════════════════════════════════════════════
+
 import { NextRequest } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
 
-const SESSIONS_DIR = path.join(process.cwd(), "data", "sessions");
+const DATA_DIR = path.join(process.cwd(), "data", "users");
 
-function ensureDir() {
-  if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+function ensureUserDir(userId: string) {
+  const dir = path.join(DATA_DIR, userId, "sessions");
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
+  return dir;
+}
+
+function getUserId(req: NextRequest): string | null {
+  return req.headers.get("x-user-id") || null;
 }
 
 interface SessionMeta {
@@ -31,14 +42,19 @@ interface SessionData {
 // DELETE /api/sessions?id=xxx — delete session
 
 export async function GET(req: NextRequest) {
-  ensureDir();
+  const userId = getUserId(req);
+  if (!userId) {
+    return Response.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  const sessionsDir = ensureUserDir(userId);
 
   // Load single session
   const loadId = req.nextUrl.searchParams.get("id");
   const load = req.nextUrl.searchParams.get("load");
   if (loadId && load === "1") {
     const safeId = loadId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const filePath = path.join(SESSIONS_DIR, `${safeId}.json`);
+    const filePath = path.join(sessionsDir, `${safeId}.json`);
     if (!fs.existsSync(filePath)) {
       return Response.json({ error: "Session not found" }, { status: 404 });
     }
@@ -53,11 +69,11 @@ export async function GET(req: NextRequest) {
 
   // List all
   try {
-    const files = fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith(".json"));
+    const files = fs.readdirSync(sessionsDir).filter((f) => f.endsWith(".json"));
     const sessions: SessionMeta[] = files
       .map((f) => {
         try {
-          const raw = fs.readFileSync(path.join(SESSIONS_DIR, f), "utf-8");
+          const raw = fs.readFileSync(path.join(sessionsDir, f), "utf-8");
           const data = JSON.parse(raw) as SessionData;
           return {
             id: data.id,
@@ -80,7 +96,12 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  ensureDir();
+  const userId = getUserId(req);
+  if (!userId) {
+    return Response.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  const sessionsDir = ensureUserDir(userId);
   try {
     const body = await req.json();
     const { id, title, messages } = body;
@@ -89,8 +110,8 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: "id, title, and messages are required" }, { status: 400 });
     }
 
-    const existing = fs.existsSync(path.join(SESSIONS_DIR, `${id}.json`));
-    const filePath = path.join(SESSIONS_DIR, `${id}.json`);
+    const existing = fs.existsSync(path.join(sessionsDir, `${id}.json`));
+    const filePath = path.join(sessionsDir, `${id}.json`);
     const now = Date.now();
 
     let existingData: SessionData | null = null;
@@ -116,13 +137,18 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  ensureDir();
+  const userId = getUserId(req);
+  if (!userId) {
+    return Response.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  const sessionsDir = ensureUserDir(userId);
   const id = req.nextUrl.searchParams.get("id");
   if (!id) {
     return Response.json({ error: "id is required" }, { status: 400 });
   }
 
-  const filePath = path.join(SESSIONS_DIR, `${id.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
+  const filePath = path.join(sessionsDir, `${id.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
   if (!fs.existsSync(filePath)) {
     return Response.json({ error: "Session not found" }, { status: 404 });
   }

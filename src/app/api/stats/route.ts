@@ -1,28 +1,17 @@
-import { NextResponse } from "next/server";
+// ═══════════════════════════════════════════════════════════════
+// 统计数据 API — 每用户独立统计
+// Stats API — Per-user isolated stats
+// ═══════════════════════════════════════════════════════════════
+
+import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { agents } from "@/data/agents";
 
-// ── 统计数据 API / Stats API ──
-// 从持久化的会话文件中聚合统计 / Aggregate stats from persisted session files
-export async function GET() {
-  try {
-    const [sessions, workspaceFiles] = await Promise.all([
-      getSessionsStats(),
-      getWorkspaceFileCount(),
-    ]);
+const DATA_DIR = path.join(process.cwd(), "data", "users");
 
-    const agentUsage = getAgentUsage(sessions.allSessions);
-
-    return NextResponse.json({
-      sessions: { total: sessions.total, recent: sessions.recent },
-      workspaceFiles,
-      agentUsage,
-      totalAgents: agents.length,
-    });
-  } catch (e) {
-    return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
-  }
+function getUserId(req: NextRequest): string | null {
+  return req.headers.get("x-user-id") || null;
 }
 
 interface SessionInfo {
@@ -34,9 +23,9 @@ interface SessionInfo {
   messages?: Array<{ speaker: string; isUser?: boolean; isSystem?: boolean }>;
 }
 
-async function getSessionsStats() {
+async function getSessionsStats(userId: string) {
   try {
-    const dir = path.join(process.cwd(), "data", "sessions");
+    const dir = path.join(DATA_DIR, userId, "sessions");
     const files = await fs.readdir(dir);
     const allSessions = await Promise.all(
       files
@@ -67,9 +56,9 @@ async function getSessionsStats() {
   }
 }
 
-async function getWorkspaceFileCount() {
+async function getWorkspaceFileCount(userId: string) {
   try {
-    const dir = path.join(process.cwd(), "public", "workspace");
+    const dir = path.join(process.cwd(), "public", "workspace", userId);
     const files = await fs.readdir(dir);
     return files.filter((f) => !f.startsWith(".")).length;
   } catch {
@@ -77,7 +66,6 @@ async function getWorkspaceFileCount() {
   }
 }
 
-// ── 从会话消息中统计 Agent 使用频率 / Agent usage stats from session messages ──
 function getAgentUsage(sessions: SessionInfo[]) {
   const usage: Record<string, number> = {};
   for (const session of sessions) {
@@ -91,4 +79,29 @@ function getAgentUsage(sessions: SessionInfo[]) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([name, count]) => ({ name, count }));
+}
+
+export async function GET(req: NextRequest) {
+  const userId = getUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  try {
+    const [sessions, workspaceFiles] = await Promise.all([
+      getSessionsStats(userId),
+      getWorkspaceFileCount(userId),
+    ]);
+
+    const agentUsage = getAgentUsage(sessions.allSessions);
+
+    return NextResponse.json({
+      sessions: { total: sessions.total, recent: sessions.recent },
+      workspaceFiles,
+      agentUsage,
+      totalAgents: agents.length,
+    });
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 });
+  }
 }

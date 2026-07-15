@@ -40,12 +40,22 @@ export interface KnowledgeBase {
 }
 
 // ── 存储 / Storage ──
-const KB_STORAGE_KEY = "agent_knowledge_base";
+const KB_STORAGE_PREFIX = "agent_knowledge_base";
+
+function getKBKey(userId: string): string {
+  return `${KB_STORAGE_PREFIX}_${userId}`;
+}
+
+let currentUserId = "";
+
+export function setDreamsUserId(userId: string): void {
+  currentUserId = userId;
+}
 
 function loadKB(): KnowledgeBase {
   if (typeof window === "undefined") return { memories: [], dreamReports: [], lastConsolidation: 0 };
   try {
-    const stored = localStorage.getItem(KB_STORAGE_KEY);
+    const stored = localStorage.getItem(getKBKey(currentUserId || "anonymous"));
     return stored ? JSON.parse(stored) : { memories: [], dreamReports: [], lastConsolidation: 0 };
   } catch {
     return { memories: [], dreamReports: [], lastConsolidation: 0 };
@@ -62,7 +72,7 @@ function saveKB(kb: KnowledgeBase): void {
     if (kb.dreamReports.length > 100) {
       kb.dreamReports = kb.dreamReports.slice(-100);
     }
-    localStorage.setItem(KB_STORAGE_KEY, JSON.stringify(kb));
+    localStorage.setItem(getKBKey(currentUserId || "anonymous"), JSON.stringify(kb));
   } catch {}
 }
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import type { DiversityMetrics } from "@/lib/diversity";
+import { getCurrentUserId } from "@/lib/pouch";
 
 // ── 多样性仪表盘面板 / Diversity Dashboard Panel ──
 export default function DiversityPanel() {
@@ -10,9 +11,10 @@ export default function DiversityPanel() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 从 localStorage 加载最近一次多样性评估
+    const uid = getCurrentUserId() || "anonymous";
+    const key = `last_diversity_metrics_${uid}`;
     try {
-      const stored = localStorage.getItem("last_diversity_metrics");
+      const stored = localStorage.getItem(key);
       if (stored) {
         setMetrics(JSON.parse(stored));
       }

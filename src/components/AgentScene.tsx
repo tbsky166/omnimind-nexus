@@ -8,7 +8,6 @@ import sprites, { type SpriteData } from "@/data/sprites";
 import EmojiSVG from "@/components/EmojiSVG";
 import { useSettings } from "@/lib/settings";
 import { evolvePersonality } from "@/lib/personality";
-import { trackAgentRun } from "@/lib/achievements";
 
 /* ═══════════════════════════════════════════════════════════════
    AgentScene — 2D 像素办公场景
@@ -361,7 +360,7 @@ export default function AgentScene() {
           message: text,
           history: messagesRef.current.filter(m => !m.isUser).slice(-20),
           fileContext: uploadedFileRef.current ? { name: uploadedFileRef.current.name, content: uploadedFileRef.current.content, type: uploadedFileRef.current.type } : null,
-          settings: { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, tavilyApiKey: settings.tavilyApiKey, enableSwarm: settings.enableSwarm, enableEvolution: settings.enableEvolution, enableKnowledgeGraph: settings.enableKnowledgeGraph, enableMetacognition: settings.enableMetacognition },
+          settings: { apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, tavilyApiKey: settings.tavilyApiKey },
         }),
       });
 

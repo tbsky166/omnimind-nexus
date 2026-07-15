@@ -3,6 +3,8 @@
 // Cognitive Diversity Index — measures team thinking diversity, detects groupthink
 // ═══════════════════════════════════════════════════════════════════════
 
+import { getCurrentUserId } from "@/lib/pouch";
+
 /** 多样性指标 / Diversity metrics */
 export interface DiversityMetrics {
   overallScore: number;           // 总体多样性得分 0-100，越高越多样
@@ -230,12 +232,16 @@ export interface DiversityTrend {
   groupthinkRisk: string;
 }
 
-const TREND_STORAGE_KEY = "diversity_trends";
+// ── 存储（按用户隔离）/ Storage (per-user) ──
+function getTrendKey(): string {
+  const uid = typeof window !== "undefined" ? (getCurrentUserId() || "anonymous") : "anonymous";
+  return `diversity_trends_${uid}`;
+}
 
 export function getDiversityTrends(): DiversityTrend[] {
   if (typeof window === "undefined") return [];
   try {
-    const stored = localStorage.getItem(TREND_STORAGE_KEY);
+    const stored = localStorage.getItem(getTrendKey());
     return stored ? JSON.parse(stored) : [];
   } catch {
     return [];
@@ -247,8 +253,7 @@ export function addDiversityTrend(trend: DiversityTrend): void {
   try {
     const trends = getDiversityTrends();
     trends.push(trend);
-    // 只保留最近 50 条
     const trimmed = trends.slice(-50);
-    localStorage.setItem(TREND_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(getTrendKey(), JSON.stringify(trimmed));
   } catch {}
 }

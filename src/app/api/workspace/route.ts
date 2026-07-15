@@ -1,11 +1,23 @@
-import { NextResponse } from "next/server";
+// ═══════════════════════════════════════════════════════════════
+// 工作区 API — 每用户独立文件列表 / Per-user isolated workspace API
+// ═══════════════════════════════════════════════════════════════
+
+import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 
-// ── 工作区文件列表 / Workspace file listing ──
-export async function GET() {
+function getUserId(req: NextRequest): string | null {
+  return req.headers.get("x-user-id") || null;
+}
+
+export async function GET(req: NextRequest) {
+  const userId = getUserId(req);
+  if (!userId) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
   try {
-    const workspaceDir = path.join(process.cwd(), "public", "workspace");
+    const workspaceDir = path.join(process.cwd(), "public", "workspace", userId);
     const tempDir = path.join(process.cwd(), "public", "temp");
 
     const [workspaceFiles, tempFiles] = await Promise.all([

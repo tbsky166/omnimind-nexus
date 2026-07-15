@@ -212,10 +212,7 @@ export default function DashboardPage() {
                 <Link href="/workspace" className="btn-pixel">
                   工作区文件
                 </Link>
-                <Link href="/dreams" className="btn-pixel">
-                  🌙 Agent 梦境
-                </Link>
-              </div>
+                </div>
             </section>
           </>
         )}

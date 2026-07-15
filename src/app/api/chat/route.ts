@@ -21,16 +21,22 @@ import { parseAgentDSL, serializeDSL } from "@/lib/agent-dsl";
 import { generateAgentPackage, generateAgentRegistry } from "@/lib/agent-factory";
 import { generateFullExtension } from "@/lib/nextjs-builder";
 import { findTemplate } from "@/data/agent-templates";
-import { executeGenerateDocument, executeFileWrite, executeFileRead, executeCodebaseRead, executeCodebaseList, executeCodebaseEdit } from "@/lib/document";
+import { executeGenerateDocument, executeFileWrite, executeFileRead, executeCodebaseRead, executeCodebaseList, executeCodebaseEdit, setWorkspaceUserId } from "@/lib/document";
 import { agents } from "@/data/agents";
 import { addEntity, addRelation, applyForgettingCurve, generateGraphSummary } from "@/lib/knowledge-graph";
-import { globalKnowledgeGraph, lastForgettingCurve } from "@/lib/kg-store";
+import { getKnowledgeGraph, lastForgettingCurve } from "@/lib/kg-store";
 import { createMetacognitionManager, startThinking, recordThinking, endThinking, formatReflectionReport } from "@/lib/metacognition";
 import { runSwarmConsensus, createSwarmMemory, type SwarmConfig } from "@/lib/swarm";
 import { runEvolution, initializePopulation, type EvolutionConfig, type EvolutionResult } from "@/lib/evolution";
 import { calculateDiversity, type DiversityMetrics } from "@/lib/diversity";
 import { analyzeCounterfactual, saveCounterfactualAnalysis } from "@/lib/counterfactual";
+import { runMoA, runQuickMoA, LITE_EXPERT_ROLES, type MoaResult } from "@/lib/moa";
+import { extractSkills } from "@/lib/skill-creator";
+import { updateProfileFromMessage, generateProfileSummary } from "@/lib/user-model";
 import { addMemory } from "@/lib/dreams";
+import { createApproval, checkApproval, type PendingApproval } from "@/lib/approval-store";
+import { generateLearningSummary, extractTagsFromError, recordLearning } from "@/lib/self-improving";
+import { executeMCPTool } from "@/lib/mcp-client";
 
 // ── 全局元认知状态：追踪所有 Agent 的思维过程 / Global metacognition state: track all agents' thinking processes ──
 const globalMetacognition = createMetacognitionManager({
@@ -47,6 +53,14 @@ const globalMetacognition = createMetacognitionManager({
 // ── 模块级 tavilyApiKey（从 POST handler 设置，供 toolExecutor 使用）/ Module-level tavilyApiKey (set by POST handler, used by toolExecutor) ──
 let currentTavilyApiKey: string | undefined;
 
+// ── 模块级 userId（从 POST handler 设置，供 toolExecutor 使用）/ Module-level userId (set by POST handler, used by toolExecutor) ──
+let currentUserId = "";
+
+// ── 模块级审批回调：由 SSE 流注册，供 toolExecutor 向前端推送审批事件 / Module-level approval callback: registered by SSE stream, used by toolExecutor to push approval events to frontend ──
+let onApprovalNeeded: ((approval: PendingApproval) => void) | null = null;
+// ── 模块级工具进度回调：供 toolExecutor 向前端推送工具执行进度 / Module-level tool progress callback: used by toolExecutor to push tool execution progress ──
+let onToolProgress: ((event: { type: "tool_start" | "tool_end"; name: string; args: Record<string, unknown>; result?: string }) => void) | null = null;
+
 export const runtime = "nodejs";
 
 // ---- 前端展示用的 Agent 消息数据结构 / Data structure for Agent messages displayed in the frontend ----
@@ -62,6 +76,8 @@ interface AgentMessage {
   fileFormat?: string;
   toolName?: string;
   toolAction?: string;
+  toolResult?: string;       // 工具返回的原始结果 / Raw tool result
+  toolSuccess?: boolean;     // 工具是否成功 / Whether tool succeeded
   streaming?: "start" | "delta" | "end";
   delta?: string;
 }
@@ -176,104 +192,132 @@ function buildMessages(prevMessages: ChatMessage[], currentContext: string, sess
 
 // ---- 工具执行器：根据工具名称分发到具体的文档/文件操作实现 / Tool executor: dispatches tool calls to concrete document/file operation implementations ----
 async function toolExecutor(name: string, args: Record<string, unknown>): Promise<string> {
+  // 发送工具开始事件 / Send tool start event
+  onToolProgress?.({ type: "tool_start", name, args });
+
+  let result: string;
+
   if (name === "generate_document") {
-    const result = await executeGenerateDocument(args);
-    if (result.success) {
-      return JSON.stringify({
-        success: true,
-        tool: "generate_document",
-        fileName: result.fileName,
-        fileUrl: result.fileUrl,
-        format: result.format,
-        message: result.message,
+    const r = await executeGenerateDocument(args);
+    if (r.success) {
+      result = JSON.stringify({
+        success: true, tool: "generate_document",
+        fileName: r.fileName, fileUrl: r.fileUrl, format: r.format, message: r.message,
+      });
+    } else {
+      result = JSON.stringify({ success: false, error: r.message });
+    }
+  } else if (name === "file_write") {
+    const r = await executeFileWrite(args);
+    result = JSON.stringify({
+      success: r.success, tool: "file_write",
+      fileName: r.fileName, fileUrl: r.fileUrl, action: r.action, message: r.message,
+    });
+  } else if (name === "file_read") {
+    const r = await executeFileRead((args.path as string) || "");
+    result = JSON.stringify({
+      success: r.success, tool: "file_read",
+      content: r.content, message: r.message,
+    });
+  } else if (name === "codebase_read") {
+    const r = await executeCodebaseRead((args.path as string) || "", process.cwd());
+    result = JSON.stringify({
+      success: r.success, tool: "codebase_read",
+      filePath: r.filePath, content: r.content, size: r.size, message: r.message,
+    });
+  } else if (name === "codebase_list") {
+    const r = executeCodebaseList((args.path as string) || "", process.cwd());
+    result = JSON.stringify({
+      success: r.success, tool: "codebase_list",
+      dirPath: r.dirPath, entries: r.entries, message: r.message,
+    });
+  } else if (name === "codebase_edit") {
+    // ═══ 审批流程：codebase_edit 需要用户确认 / Approval flow: codebase_edit requires user confirmation ═══
+    const filePath = (args.path as string) || "";
+    const oldString = (args.old_string as string) || "";
+    const newString = (args.new_string as string) || "";
+
+    // 创建审批请求 / Create approval request
+    const approval = createApproval(currentUserId, filePath, oldString, newString);
+
+    // 通知前端显示审批卡片 / Notify frontend to show approval card
+    onApprovalNeeded?.(approval);
+
+    // 轮询等待审批结果（最多 30 秒）/ Poll for approval result (max 30 seconds)
+    const startTime = Date.now();
+    while (Date.now() - startTime < 30_000) {
+      await new Promise((r) => setTimeout(r, 500));
+      const status = checkApproval(currentUserId, approval.id);
+      if (status === "approved") {
+        // 执行编辑 / Execute the edit
+        const editResult = executeCodebaseEdit(filePath, oldString, newString, process.cwd());
+        result = JSON.stringify({
+          success: editResult.success, tool: "codebase_edit",
+          filePath: editResult.filePath, message: editResult.message,
+          linesChanged: editResult.linesChanged, approved: true,
+        });
+        break;
+      }
+      if (status === "denied") {
+        result = JSON.stringify({
+          success: false, tool: "codebase_edit",
+          filePath, message: "用户拒绝了编辑操作", linesChanged: 0, approved: false,
+        });
+        break;
+      }
+    }
+    // 超时 / Timeout
+    if (!result!) {
+      result = JSON.stringify({
+        success: false, tool: "codebase_edit",
+        filePath, message: "审批超时（30秒内未响应），操作已自动拒绝", linesChanged: 0, approved: false,
       });
     }
-    return JSON.stringify({ success: false, error: result.message });
-  }
-
-  if (name === "file_write") {
-    const result = await executeFileWrite(args);
-    return JSON.stringify({
-      success: result.success,
-      tool: "file_write",
-      fileName: result.fileName,
-      fileUrl: result.fileUrl,
-      action: result.action,
-      message: result.message,
-    });
-  }
-
-  if (name === "file_read") {
-    const result = await executeFileRead((args.path as string) || "");
-    return JSON.stringify({
-      success: result.success,
-      tool: "file_read",
-      content: result.content,
-      message: result.message,
-    });
-  }
-
-  if (name === "codebase_read") {
-    const result = await executeCodebaseRead((args.path as string) || "", process.cwd());
-    return JSON.stringify({
-      success: result.success,
-      tool: "codebase_read",
-      filePath: result.filePath,
-      content: result.content,
-      size: result.size,
-      message: result.message,
-    });
-  }
-
-  if (name === "codebase_list") {
-    const result = executeCodebaseList((args.path as string) || "", process.cwd());
-    return JSON.stringify({
-      success: result.success,
-      tool: "codebase_list",
-      dirPath: result.dirPath,
-      entries: result.entries,
-      message: result.message,
-    });
-  }
-
-  if (name === "codebase_edit") {
-    const result = executeCodebaseEdit(
-      (args.path as string) || "",
-      (args.old_string as string) || "",
-      (args.new_string as string) || "",
-      process.cwd()
-    );
-    return JSON.stringify({
-      success: result.success,
-      tool: "codebase_edit",
-      filePath: result.filePath,
-      message: result.message,
-      linesChanged: result.linesChanged,
-    });
-  }
-
-  if (name === "web_search") {
+  } else if (name === "web_search") {
     const { webSearch, formatSearchResults } = await import("@/lib/search");
     const query = (args.query as string) || "";
     if (!query.trim()) {
-      return JSON.stringify({ success: false, error: "搜索关键词不能为空" });
+      result = JSON.stringify({ success: false, error: "搜索关键词不能为空" });
+    } else {
+      try {
+        const r = await webSearch(query, currentTavilyApiKey);
+        result = JSON.stringify({
+          success: true, tool: "web_search",
+          query: r.query, answer: r.answer,
+          results: r.results.slice(0, 5), formatted: formatSearchResults(r),
+          searchTime: r.searchTime,
+        });
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : "搜索失败";
+        result = JSON.stringify({
+          success: false, tool: "web_search", error: errMsg,
+          hint: errMsg.includes("API Key") ? "请在设置页面配置 Tavily API Key（免费注册：https://tavily.com）" : "请检查网络连接后重试",
+        });
+      }
     }
-    const result = await webSearch(query, currentTavilyApiKey);
-    return JSON.stringify({
-      success: true,
-      tool: "web_search",
-      query: result.query,
-      answer: result.answer,
-      results: result.results.slice(0, 5),
-      formatted: formatSearchResults(result),
-      searchTime: result.searchTime,
-    });
+  } else if (name.startsWith("browser_")) {
+    // ── 浏览器自动化工具（动态加载可选依赖）/ Browser automation tools (dynamic load optional dependency) ──
+    try {
+      const { executeBrowserTool } = await import("@/lib/browser");
+      result = await executeBrowserTool(name, args);
+    } catch (e) {
+      result = JSON.stringify({
+        success: false, error: `浏览器工具不可用：${e instanceof Error ? e.message : "Playwright 未安装。运行 npm install playwright && npx playwright install chromium"}`,
+      });
+    }
+  } else if (name.startsWith("mcp_")) {
+    // ── MCP 外部工具 / MCP external tools ──
+    result = await executeMCPTool(name, args);
+  } else {
+    result = JSON.stringify({ error: `Unknown tool: ${name}` });
   }
 
-  return JSON.stringify({ error: `Unknown tool: ${name}` });
+  // 发送工具结束事件 / Send tool end event
+  onToolProgress?.({ type: "tool_end", name, args, result });
+  return result;
 }
 
-// ---- 发送工具调用卡片：当 Agent 调用了 generate_document 或 file_write 时，向前端推送包含文件下载链接的卡片消息 / Send tool call card: when an Agent calls generate_document or file_write, push a card message with file download link to the frontend ----
+// ---- 发送工具调用卡片：所有工具调用都显示卡片，包括成功和失败 / Send tool call card: all tool calls get a card, both success and error ----
 async function sendToolCard(
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
@@ -285,47 +329,124 @@ async function sendToolCard(
 ) {
   try {
     const parsed = JSON.parse(toolResult);
-    if (!parsed.success) return;
+    const success = parsed.success !== false;
+    const isError = !success;
 
-    if (parsed.tool === "generate_document") {
+    if (parsed.tool === "generate_document" || parsed.tool === "file_write") {
       const msg: AgentMessage = {
         speaker: agentName,
-        emoji: agentEmoji,
-        content: parsed.fileName,
+        emoji: isError ? "❌" : agentEmoji,
+        content: isError
+          ? `**${toolName}** 失败：${parsed.error || parsed.message || "未知错误"}`
+          : parsed.fileName || "文件",
         a2aLayer,
-        toolName: "generate_document",
-        toolAction: `生成 ${parsed.format?.toUpperCase()} 文档`,
-        fileUrl: parsed.fileUrl,
-        downloadName: parsed.fileName,
-        fileFormat: parsed.format,
-      };
-      await writeSSE(controller, encoder, msg);
-    } else if (parsed.tool === "file_write") {
-      const msg: AgentMessage = {
-        speaker: agentName,
-        emoji: agentEmoji,
-        content: parsed.fileName,
-        a2aLayer,
-        toolName: "file_write",
-        toolAction: `${parsed.action === "append" ? "追加" : "写入"}文件`,
-        fileUrl: parsed.fileUrl,
-        downloadName: parsed.fileName,
-        fileFormat: parsed.fileName?.split(".").pop() || "txt",
+        toolName: parsed.tool as string,
+        toolAction: isError ? "工具失败" : parsed.tool === "generate_document" ? `生成 ${(parsed.format as string)?.toUpperCase() || ""} 文档` : `${parsed.action === "append" ? "追加" : "写入"}文件`,
+        toolSuccess: success,
+        toolResult: isError ? undefined : JSON.stringify(parsed, null, 2).substring(0, 500),
+        fileUrl: parsed.fileUrl || undefined,
+        downloadName: parsed.fileName || undefined,
+        fileFormat: parsed.format || undefined,
       };
       await writeSSE(controller, encoder, msg);
     } else if (parsed.tool === "codebase_edit") {
       const msg: AgentMessage = {
         speaker: agentName,
-        emoji: agentEmoji,
-        content: `编辑 ${parsed.filePath}（${parsed.linesChanged > 0 ? `+${parsed.linesChanged}` : parsed.linesChanged} 行）`,
+        emoji: isError ? "❌" : "✏️",
+        content: isError
+          ? `**codebase_edit** 失败：${parsed.error || parsed.message || "未知错误"}\n> ${parsed.filePath || ""}`
+          : `编辑 ${parsed.filePath}（${parsed.linesChanged > 0 ? `+${parsed.linesChanged}` : parsed.linesChanged} 行）${parsed.approved ? " | 已批准" : " | 未批准"}`,
         a2aLayer,
         toolName: "codebase_edit",
-        toolAction: "编辑源码",
+        toolAction: isError ? "编辑失败" : "编辑源码",
+        toolSuccess: success,
+        toolResult: isError ? undefined : JSON.stringify(parsed, null, 2).substring(0, 500),
+      };
+      await writeSSE(controller, encoder, msg);
+    } else if (parsed.tool === "web_search") {
+      const results = parsed.results as Array<{ title: string; url: string; content: string }> | undefined;
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: isError ? "❌" : "🔍",
+        content: isError
+          ? `**web_search** 失败：${parsed.error || "未知错误"}\n${parsed.hint ? `> ${parsed.hint}` : ""}`
+          : `**搜索**: ${parsed.query}\n${(parsed.answer as string || "").substring(0, 200)}\n${results?.slice(0, 3).map((r: { title: string; url: string }) => `- ${r.title}`).join("\n") || ""}`,
+        a2aLayer,
+        toolName: "web_search",
+        toolAction: isError ? "搜索失败" : `搜索: ${(parsed.query as string || "").substring(0, 30)}`,
+        toolSuccess: success,
+        toolResult: isError ? undefined : JSON.stringify(parsed, null, 2).substring(0, 500),
+      };
+      await writeSSE(controller, encoder, msg);
+    } else if (parsed.tool === "codebase_read") {
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: isError ? "❌" : "📖",
+        content: isError
+          ? `**codebase_read** 失败：${parsed.error || parsed.message || "未知错误"}`
+          : `读取 \`${parsed.filePath}\`（${parsed.size} 字节）`,
+        a2aLayer,
+        toolName: "codebase_read",
+        toolAction: isError ? "读取失败" : "读取源码",
+        toolSuccess: success,
+      };
+      await writeSSE(controller, encoder, msg);
+    } else if (parsed.tool === "codebase_list") {
+      const entries = parsed.entries as Array<{ name: string; type: string }> | undefined;
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: isError ? "❌" : "📂",
+        content: isError
+          ? `**codebase_list** 失败：${parsed.error || parsed.message || "未知错误"}`
+          : `列出 \`${parsed.dirPath}\`\n${entries?.slice(0, 8).map((e: { name: string; type: string }) => `  ${e.type === "dir" ? "📁" : "📄"} ${e.name}`).join("\n") || ""}`,
+        a2aLayer,
+        toolName: "codebase_list",
+        toolAction: isError ? "列目录失败" : "列目录",
+        toolSuccess: success,
+      };
+      await writeSSE(controller, encoder, msg);
+    } else if (parsed.tool === "file_read") {
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: isError ? "❌" : "📖",
+        content: isError
+          ? `**file_read** 失败：${parsed.error || parsed.message || "未知错误"}`
+          : `读取文件：${(parsed.content as string || "").substring(0, 150)}`,
+        a2aLayer,
+        toolName: "file_read",
+        toolAction: isError ? "读取失败" : "读取文件",
+        toolSuccess: success,
+      };
+      await writeSSE(controller, encoder, msg);
+    } else {
+      // ── 通用工具卡片：浏览器/MCP/未知工具 / Generic tool card: browser/MCP/unknown tools ──
+      const msg: AgentMessage = {
+        speaker: agentName,
+        emoji: isError ? "❌" : "🔧",
+        content: isError
+          ? `**${toolName}** 失败：${parsed.error || parsed.message || "未知错误"}`
+          : `**${toolName}** 执行完成`,
+        a2aLayer,
+        toolName,
+        toolAction: isError ? "工具失败" : "工具调用",
+        toolSuccess: success,
+        toolResult: isError ? undefined : JSON.stringify(parsed, null, 2).substring(0, 500),
       };
       await writeSSE(controller, encoder, msg);
     }
   } catch {
-    // skip
+    // JSON 解析失败 → 原始文本卡片 / JSON parse failure → raw text card
+    const msg: AgentMessage = {
+      speaker: agentName,
+      emoji: "🔧",
+      content: `**${toolName}** 执行完成`,
+      a2aLayer,
+      toolName,
+      toolAction: "工具调用",
+      toolSuccess: false,
+      toolResult: toolResult.substring(0, 300),
+    };
+    await writeSSE(controller, encoder, msg);
   }
 }
 
@@ -388,6 +509,12 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
 
   try {
+    // 获取当前用户 / Get current user from middleware
+    const userId = req.headers.get("x-user-id") || "anonymous";
+    currentUserId = userId;
+    setWorkspaceUserId(userId);
+    const kg = getKnowledgeGraph(userId);
+
     // ---- 请求解析：提取消息、历史记录、文件上下文，并校验 API Key / Request parsing: extract message, history, file context, and validate API Key ----
     const { message, history: prevHistory, fileContext, settings: clientSettings, _test } = await req.json();
     if (!message || typeof message !== "string") {
@@ -399,11 +526,12 @@ export async function POST(req: NextRequest) {
     const baseUrl = clientSettings?.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
     const model = clientSettings?.model || process.env.OPENAI_MODEL || "gpt-4o";
 
-    // 功能开关 / Feature toggles
-    const enableSwarm = clientSettings?.enableSwarm ?? true;
-    const enableEvolution = clientSettings?.enableEvolution ?? false;
-    const enableKnowledgeGraph = clientSettings?.enableKnowledgeGraph ?? true;
-    const enableMetacognition = clientSettings?.enableMetacognition ?? true;
+    // 功能开关 — 所有高级特性默认启用，不再需要用户手动开启
+    const enableSwarm = true;
+    const enableEvolution = true;
+    const enableKnowledgeGraph = true;
+    const enableMetacognition = true;
+    const enableMoA = true;
 
     // 设置模块级变量供 toolExecutor 使用 / Set module-level variable for toolExecutor
     currentTavilyApiKey = clientSettings?.tavilyApiKey;
@@ -422,6 +550,20 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         const history: AgentMessage[] = [];
+
+        // ── 注册审批回调：向前端推送审批事件 / Register approval callback: push approval events to frontend ──
+        onApprovalNeeded = (approval) => {
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ type: "approval_needed", id: approval.id, filePath: approval.filePath, oldString: approval.oldString, newString: approval.newString, diffLines: approval.diffLines, timeout: approval.timeout })}\n\n`
+          ));
+        };
+
+        // ── 注册工具进度回调：向前端推送工具执行进度 / Register tool progress callback: push tool execution progress to frontend ──
+        onToolProgress = (event) => {
+          controller.enqueue(encoder.encode(
+            `data: ${JSON.stringify({ type: "tool_progress", event: event.type, name: event.name, args: event.args, result: event.result })}\n\n`
+          ));
+        };
 
         try {
           // ═══ 第一阶段：Router(分析+规划) — 解构需求、选择 Agent、制定执行计划 / Phase 1: Router (analyze + plan) — deconstruct, select, and plan ═══
@@ -443,7 +585,10 @@ export async function POST(req: NextRequest) {
             routerMsgs.push({ role: "user", content: `用户需求：${message}` });
           }
 
-          const routerResult_raw = await callLLM(buildRouterPrompt(), routerMsgs, apiKey, baseUrl, model);
+          const routerResult_raw = await callLLM(
+            buildRouterPrompt() + "\n\n" + generateLearningSummary(currentUserId),
+            routerMsgs, apiKey, baseUrl, model
+          );
           const routerResult = parseRouterResponse(routerResult_raw.content);
 
           const selectedAgents = routerResult?.selectedAgents || ["架构师", "编码 Agent", "安全 Agent"];
@@ -523,7 +668,7 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           if (enableKnowledgeGraph) {
             const now = Date.now();
             if (now - lastForgettingCurve.value > 3600000) {
-            applyForgettingCurve(globalKnowledgeGraph, 7 * 24 * 3600 * 1000);
+            applyForgettingCurve(kg, 7 * 24 * 3600 * 1000);
             lastForgettingCurve.value = now;
             }
           }
@@ -560,10 +705,79 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
             const msgs = buildMessages(prevMessages, fullContext, formatHistory(history));
 
             try {
-              const { content, toolResults } = await runStreamingAgent(
-                controller, encoder, taskedPrompt, msgs, apiKey, baseUrl, model,
-                agentName, agentEmoji, "L4", true, 4096
-              );
+              let content = "";
+              const toolResults: { name: string; result: string }[] = [];
+
+              if (enableMoA) {
+                // ── MoA 混合智能体：多专家会诊 / MoA: multi-expert consultation ──
+                const moaNotice: AgentMessage = {
+                  speaker: agentName, emoji: agentEmoji,
+                  content: `🧠 MoA 混合智能体启动 —— 4 位专家并行分析中...`,
+                  a2aLayer: "L4", isSystem: true,
+                };
+                history.push(moaNotice);
+                await writeSSE(controller, encoder, moaNotice);
+
+                const moaResult = await runQuickMoA(
+                  message,
+                  [{ role: "system", content: taskedPrompt }, ...msgs],
+                  model, baseUrl, apiKey, LITE_EXPERT_ROLES,
+                );
+
+                // 发送各专家意见 / Send expert opinions
+                for (const opinion of moaResult.expertOpinions) {
+                  controller.enqueue(encoder.encode(
+                    `data: ${JSON.stringify({ type: "moa_expert", agentName, expert: opinion.name, role: opinion.role, confidence: opinion.confidence, duration: opinion.duration, content: opinion.content.substring(0, 200) + "..." })}\n\n`
+                  ));
+                }
+
+                // 发送 MoA 综合结果 / Send MoA synthesized result
+                const moaSummary: AgentMessage = {
+                  speaker: agentName, emoji: agentEmoji,
+                  content: `📊 综合 ${moaResult.expertCount} 位专家意见（耗时 ${(moaResult.totalDuration / 1000).toFixed(1)}s）\n\n${moaResult.finalAnswer}`,
+                  a2aLayer: "L4",
+                };
+                history.push(moaSummary);
+                await writeSSE(controller, encoder, moaSummary);
+                content = moaResult.finalAnswer;
+
+                if (moaResult.reasoning) {
+                  const reasoningMsg: AgentMessage = {
+                    speaker: "🧠 MoA", emoji: "🧠",
+                    content: `推理过程：${moaResult.reasoning}`,
+                    a2aLayer: "L4", isSystem: true,
+                  };
+                  history.push(reasoningMsg);
+                  await writeSSE(controller, encoder, reasoningMsg);
+                }
+
+                // ── MoA 后工具调用轮次：让 Agent 可以通过工具验证/扩展 MoA 结果 / Post-MoA tool calling round: let Agent verify/extend MoA result with tools ──
+                const toolMsgs: ChatMessage[] = [
+                  { role: "system", content: taskedPrompt },
+                  ...msgs,
+                  { role: "assistant", content: moaResult.finalAnswer },
+                  { role: "user", content: `以上是 MoA 多专家会诊的综合结果。现在你可以使用工具（如 web_search 联网搜索、codebase_read 读代码等）来验证关键信息、补充最新数据、或执行实际操作。如果需要，请调用工具；如果不需要，直接回复"无需工具"即可。` },
+                ];
+                const toolResult = await runStreamingAgent(
+                  controller, encoder, taskedPrompt, toolMsgs, apiKey, baseUrl, model,
+                  agentName, agentEmoji, "L4", true, 4096
+                );
+                if (toolResult.toolResults && toolResult.toolResults.length > 0) {
+                  toolResults.push(...toolResult.toolResults);
+                  // 如果有工具调用结果，更新 content 为工具调用后的最终回复
+                  if (toolResult.content && !/无需工具|不需要工具|no tools needed/i.test(toolResult.content)) {
+                    content = toolResult.content;
+                  }
+                }
+              } else {
+                // ── 标准流式 Agent / Standard streaming agent ──
+                const result = await runStreamingAgent(
+                  controller, encoder, taskedPrompt, msgs, apiKey, baseUrl, model,
+                  agentName, agentEmoji, "L4", true, 4096
+                );
+                content = result.content;
+                toolResults.push(...result.toolResults);
+              }
 
               history.push({ speaker: agentName, emoji: agentEmoji, content, a2aLayer: "L4" });
 
@@ -577,15 +791,27 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
                 await sendToolCard(controller, encoder, agentName, agentEmoji, "L4", tr.name, tr.result);
               }
 
+              // ── 自我改进引擎：自动记录成功经验 / Self-improving: auto-record success ──
+              try {
+                recordLearning(currentUserId, {
+                  type: "success",
+                  agentName,
+                  context: message.substring(0, 200),
+                  observation: `${agentName} 成功完成任务：${content.substring(0, 150)}`,
+                  tags: extractTagsFromError(content, message),
+                  confidence: 0.7,
+                });
+              } catch { /* 静默失败 / silent fail */ }
+
               // ── 知识图谱：从 Agent 响应中提取关键概念（仅在开关启用时）/ Extract key concepts (only when enabled) ──
               if (enableKnowledgeGraph) {
               const entityMatches = content.match(/(?:`[^`]+`)|(?:\b(?:API|SDK|CLI|REST|GraphQL|gRPC|WebSocket|HTTP|HTTPS|TCP|TLS|SSL|OAuth|JWT|SSO|React|Vue|Angular|Next\.js|Nuxt|Svelte|Express|Fastify|Nest|Django|Flask|FastAPI|Rails|Laravel|Spring|Gin|PostgreSQL|MySQL|MongoDB|Redis|Elasticsearch|Docker|Kubernetes|AWS|GCP|Azure|Vercel|Netlify|Cloudflare|Terraform|微服务|容器化|服务网格|事件驱动|领域驱动|CQRS|Machine Learning|Deep Learning|NLP|LLM|RAG|Vector DB|Embedding|机器学习|深度学习|自然语言处理|大语言模型|检索增强|Transformer|GAN|RL|神经网络|注意力机制|强化学习)\b)/gi);
               if (entityMatches) {
                 const uniqueEntities = [...new Set(entityMatches.map((e) => e.replace(/`/g, "").trim()).filter((e) => e.length > 1 && e.length < 50))];
                 for (const entityName of uniqueEntities) {
-                  const existingEntity = globalKnowledgeGraph.entities.get(entityName);
+                  const existingEntity = kg.entities.get(entityName);
                   if (!existingEntity) {
-                    addEntity(globalKnowledgeGraph, {
+                    addEntity(kg, {
                       name: entityName,
                       type: "concept",
                       confidence: 0.5,
@@ -604,11 +830,11 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
                 // 建立 Agent 间的关系 / Create cross-agent relations
                 for (const otherAgent of selectedAgents) {
                   if (otherAgent !== agentName) {
-                    const hasRelation = globalKnowledgeGraph.relations.some(
+                    const hasRelation = kg.relations.some(
                       (r) => r.from === agentName && r.to === otherAgent
                     );
                     if (!hasRelation) {
-                      addRelation(globalKnowledgeGraph, {
+                      addRelation(kg, {
                         from: agentName,
                         to: otherAgent,
                         type: "supports",
@@ -649,6 +875,19 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
               controller.enqueue(encoder.encode(
                 `data: ${JSON.stringify({ type: "personality_evolve", agentName, feedbackType: "task_failure", intensity: 0.8 })}\n\n`
               ));
+              // ── 自我改进引擎：记录错误 / Self-improving: record error ──
+              try {
+                const errorMsg = e instanceof Error ? e.message : "执行失败";
+                recordLearning(currentUserId, {
+                  type: "error",
+                  agentName,
+                  context: message.substring(0, 200),
+                  observation: `${agentName} 执行失败：${errorMsg}`,
+                  rootCause: errorMsg.substring(0, 100),
+                  tags: extractTagsFromError(errorMsg, message),
+                  confidence: 0.8,
+                });
+              } catch { /* 静默失败 / silent fail */ }
             }
           }
 
@@ -695,6 +934,38 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           for (const msg of l4Outputs) {
             addMemory(msg.agentName, `session_${Date.now()}`, msg.content, "insight", 60);
           }
+
+          // ── 自动技能提取：从 Agent 响应中识别可复用技能 / Auto skill extraction ──
+          const allSkills: string[] = [];
+          for (const msg of l4Outputs) {
+            const extracted = extractSkills(currentUserId, msg.content, msg.agentName);
+            if (extracted.length > 0) {
+              allSkills.push(...extracted.map((s) => s.name));
+            }
+          }
+          if (allSkills.length > 0) {
+            const skillMsg: AgentMessage = {
+              speaker: "Skill Creator", emoji: "🔧",
+              content: `自动发现 ${allSkills.length} 个新技能：${[...new Set(allSkills)].join("、")}`,
+              a2aLayer: "L6", isSystem: true,
+            };
+            history.push(skillMsg);
+            await writeSSE(controller, encoder, skillMsg);
+          }
+
+          // ── 用户模型更新：跨会话记忆偏好 / User model update ──
+          const toolsUsed = history
+            .filter((m) => m.toolName)
+            .map((m) => m.toolName!);
+          const profile = updateProfileFromMessage(userId, message, selectedAgents, toolsUsed);
+          const profileSummary = generateProfileSummary(profile);
+          const profileMsg: AgentMessage = {
+            speaker: "User Model", emoji: "👤",
+            content: profileSummary,
+            a2aLayer: "L6", isSystem: true,
+          };
+          history.push(profileMsg);
+          await writeSSE(controller, encoder, profileMsg);
 
           // ═══ 基因进化：基于本轮表现优化 Agent 参数（仅在开关启用时）/ Genetic evolution: optimize agent params (only when enabled) ═══
           if (enableEvolution && l4Outputs.length >= 2) {
@@ -900,7 +1171,7 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           }
 
           // ── 知识图谱摘要（仅在开关启用时）/ Knowledge graph summary (only when enabled) ──
-          const kgSummary = enableKnowledgeGraph ? generateGraphSummary(globalKnowledgeGraph) : "";
+          const kgSummary = enableKnowledgeGraph ? generateGraphSummary(kg) : "";
 
           // ═══ 第五阶段：L6 仲裁 — 综合各 Agent 意见，输出最终结论（≥2 Agent 时触发） / Phase 5: L6 Arbitration ═══
           if (selectedAgents.length >= 2) {
@@ -961,16 +1232,16 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           await writeSSE(controller, encoder, memMsg);
 
           // ── 知识图谱洞察：发送知识图谱统计（仅在开关启用时）/ Knowledge graph insights (only when enabled) ──
-          if (enableKnowledgeGraph && globalKnowledgeGraph.entities.size > 0) {
-            const entityArray = Array.from(globalKnowledgeGraph.entities.values());
+          if (enableKnowledgeGraph && kg.entities.size > 0) {
+            const entityArray = Array.from(kg.entities.values());
             const sortedByAccess = entityArray.sort((a, b) => b.accessCount - a.accessCount);
             const recentEntities = sortedByAccess.slice(0, 5);
             const hotEntities = sortedByAccess.slice(0, 5);
             const kgMsg: AgentMessage = {
               speaker: "Knowledge Graph", emoji: "🧠",
               content: `知识图谱更新：
-• 实体总数：${globalKnowledgeGraph.entities.size}
-• 关系总数：${globalKnowledgeGraph.relations.length}
+• 实体总数：${kg.entities.size}
+• 关系总数：${kg.relations.length}
 • 最新实体：${recentEntities.map((e) => e.name).join("、")}
 • 热门实体：${hotEntities.map((e) => `${e.name}(${e.accessCount})`).join("、")}`,
               a2aLayer: "KG", isSystem: true,
@@ -990,6 +1261,18 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
             await writeSSE(controller, encoder, metaMsg);
           }
 
+          // ── 自我改进引擎摘要 / Self-improving engine summary ──
+          const learningSummary = generateLearningSummary(currentUserId);
+          if (learningSummary) {
+            const learnMsg: AgentMessage = {
+              speaker: "Self-Improving", emoji: "📚",
+              content: learningSummary.replace(/\n/g, "\n"),
+              a2aLayer: "Learn", isSystem: true,
+            };
+            history.push(learnMsg);
+            await writeSSE(controller, encoder, learnMsg);
+          }
+
         // ═══ 错误处理：捕获流内任何阶段的异常，向前端推送错误消息 / Error handling: catch any exception from any phase within the stream and push an error message to the frontend ═══
         } catch (e) {
           const errMsg: AgentMessage = {
@@ -1000,6 +1283,8 @@ ${consensusResult.danceHistory.length > 0 ? `• 舞动通信：${consensusResul
           await writeSSE(controller, encoder, errMsg);
         // ═══ 流清理：无论成功还是失败，确保关闭 SSE 流 / Stream cleanup: always close the SSE stream regardless of success or failure ═══
         } finally {
+          onApprovalNeeded = null;
+          onToolProgress = null;
           controller.close();
         }
       },
