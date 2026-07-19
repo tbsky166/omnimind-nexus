@@ -13,14 +13,11 @@
 # 1. 安装依赖
 npm install
 
-# 2. 配置 OpenAI API Key
-echo "OPENAI_API_KEY=sk-xxx" > .env.local
+# 2. 设置JWT_SECRET(生产环境必要)
+# node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# echo "JWT_SECRET=上方命令结果" >> .env.local
 
-# 3. （可选）自定义 API 地址
-# echo "OPENAI_BASE_URL=https://api.openai.com/v1" >> .env.local
-# echo "OPENAI_MODEL=gpt-4o" >> .env.local
-
-# 4. 启动开发服务器
+# 3. 启动开发服务器
 npm run dev
 ```
 
